@@ -15,9 +15,9 @@ class CenterPoint(MVXTwoStageDetector):
                  pts_voxel_encoder=None,
                  pts_middle_encoder=None,
                  pts_fusion_layer=None,
-                 img_backbone=None,
+                 img_backbone=None, #
                  pts_backbone=None,
-                 img_neck=None,
+                 img_neck=None, #
                  pts_neck=None,
                  pts_bbox_head=None,
                  img_roi_head=None,

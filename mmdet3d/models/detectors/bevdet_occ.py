@@ -13,9 +13,9 @@ import numpy as np
 class BEVStereo4DOCC(BEVStereo4D):
 
     def __init__(self,
-                 loss_occ=None,
+                 loss_occ=None, # CrossEntropyLoss
                  out_dim=32,
-                 use_mask=False,
+                 use_mask=False, # True
                  num_classes=18,
                  use_predicter=True,
                  class_wise=False,
@@ -46,6 +46,12 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.align_after_view_transfromation = False
 
     def loss_single(self,voxel_semantics,mask_camera,preds):
+        """
+        params:
+            voxel_semantics: [B, X, Y, Z]
+            mask_camera: [B, X, Y, Z]
+            preds: [B, X, Y, Z, num_classes]
+        """
         loss_ = dict()
         voxel_semantics=voxel_semantics.long()
         if self.use_mask:
@@ -83,12 +89,12 @@ class BEVStereo4DOCC(BEVStereo4D):
 
     def forward_train(self,
                       points=None,
-                      img_metas=None,
+                      img_metas=None, #
                       gt_bboxes_3d=None,
                       gt_labels_3d=None,
                       gt_labels=None,
                       gt_bboxes=None,
-                      img_inputs=None,
+                      img_inputs=None, #
                       proposals=None,
                       gt_bboxes_ignore=None,
                       **kwargs):
@@ -117,17 +123,23 @@ class BEVStereo4DOCC(BEVStereo4D):
         Returns:
             dict: Losses of different branches.
         """
+        # kwargs keys: gt_depth, voxel_semantics, mask_lidar, mask_camera
+        # img_feats[0]: [B, C, Z, Y, X]
+        # depth: [B*N_view, D, H_L4, W_L4]
         img_feats, pts_feats, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
-        gt_depth = kwargs['gt_depth']
+        gt_depth = kwargs['gt_depth'] # [B, N_view, in_H, in_W]
         losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
-
+        # [B, X, Y, Z, C]
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
+            # [B, X, Y, Z, num_classes]
             occ_pred = self.predicter(occ_pred)
-        voxel_semantics = kwargs['voxel_semantics']
+        
+        # [B, X, Y, Z]
+        voxel_semantics = kwargs['voxel_semantics'] # torch.uint8
         mask_camera = kwargs['mask_camera']
         assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)

@@ -61,14 +61,14 @@ class Custom3DDataset(Dataset):
     """
 
     def __init__(self,
-                 data_root,
-                 ann_file,
-                 pipeline=None,
-                 classes=None,
-                 modality=None,
-                 box_type_3d='LiDAR',
-                 filter_empty_gt=True,
-                 test_mode=False,
+                 data_root, #
+                 ann_file, #
+                 pipeline=None, #
+                 classes=None, #
+                 modality=None, #
+                 box_type_3d='LiDAR', #
+                 filter_empty_gt=True, #
+                 test_mode=False, #
                  file_client_args=dict(backend='disk')):
         super().__init__()
         self.data_root = data_root

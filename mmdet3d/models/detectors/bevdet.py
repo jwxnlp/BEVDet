@@ -23,8 +23,11 @@ class BEVDet(CenterPoint):
         img_bev_encoder_neck (dict): Configuration dict of the BEV encoder neck.
     """
 
-    def __init__(self, img_view_transformer, img_bev_encoder_backbone,
-                 img_bev_encoder_neck, **kwargs):
+    def __init__(self, 
+                 img_view_transformer, #
+                 img_bev_encoder_backbone, #
+                 img_bev_encoder_neck, #
+                 **kwargs):
         super(BEVDet, self).__init__(**kwargs)
         self.img_view_transformer = builder.build_neck(img_view_transformer)
         self.img_bev_encoder_backbone = \
@@ -38,9 +41,10 @@ class BEVDet(CenterPoint):
         x = self.img_backbone(imgs)
         stereo_feat = None
         if stereo:
-            stereo_feat = x[0]
-            x = x[1:]
+            stereo_feat = x[0] # L2 feature map
+            x = x[1:] # L4,L5 feature maps
         if self.with_img_neck:
+            # [B*N_view, 256, H/16, W/16]
             x = self.img_neck(x)
             if type(x) in [list, tuple]:
                 x = x[0]
@@ -272,9 +276,9 @@ class BEVDet4D(BEVDet):
             all zero. By default, False.
     """
     def __init__(self,
-                 pre_process=None,
-                 align_after_view_transfromation=False,
-                 num_adj=1,
+                 pre_process=None, # CustomResNet3D
+                 align_after_view_transfromation=False, # False
+                 num_adj=1, # 8
                  with_prev=True,
                  **kwargs):
         super(BEVDet4D, self).__init__(**kwargs)
@@ -394,13 +398,15 @@ class BEVDet4D(BEVDet):
         x = self.bev_encoder(bev_feat)
         return [x], depth
 
-    def prepare_inputs(self, inputs, stereo=False):
+    def prepare_inputs(self, inputs, stereo=False): # stereo=True
         # split the inputs into each frame
-        B, N, C, H, W = inputs[0].shape
-        N = N // self.num_frame
+        B, N, C, H, W = inputs[0].shape # N=N_view+N_adj*N_view
+        N = N // self.num_frame # N is N_view after divide
         imgs = inputs[0].view(B, N, self.num_frame, C, H, W)
-        imgs = torch.split(imgs, 1, 2)
-        imgs = [t.squeeze(2) for t in imgs]
+        imgs = torch.split(imgs, 1, 2) # split along num_frame
+        imgs = [t.squeeze(2) for t in imgs] # [[B, N_view, C, H, W], ...]
+        # sensor2egos, ego2globals: [B, N_view+N_adj*N_view, 4, 4]
+        # bda: [B, 3, 3]
         sensor2egos, ego2globals, intrins, post_rots, post_trans, bda = \
             inputs[1:7]
 
@@ -408,6 +414,7 @@ class BEVDet4D(BEVDet):
         ego2globals = ego2globals.view(B, self.num_frame, N, 4, 4)
 
         # calculate the transformation from sweep sensor to key ego
+        # [B, 1, 1, 4, 4], keyego: CAM_FRONT's ego frame
         keyego2global = ego2globals[:, 0, 0, ...].unsqueeze(1).unsqueeze(1)
         global2keyego = torch.inverse(keyego2global.double())
         sensor2keyegos = \
@@ -417,6 +424,7 @@ class BEVDet4D(BEVDet):
         curr2adjsensor = None
         if stereo:
             sensor2egos_cv, ego2globals_cv = sensor2egos, ego2globals
+            # [B, N_TF, N_view, 4, 4]
             sensor2egos_curr = \
                 sensor2egos_cv[:, :self.temporal_frame, ...].double()
             ego2globals_curr = \
@@ -425,18 +433,20 @@ class BEVDet4D(BEVDet):
                 sensor2egos_cv[:, 1:self.temporal_frame + 1, ...].double()
             ego2globals_adj = \
                 ego2globals_cv[:, 1:self.temporal_frame + 1, ...].double()
+            # adj mean last previous frame
             curr2adjsensor = \
                 torch.inverse(ego2globals_adj @ sensor2egos_adj) \
                 @ ego2globals_curr @ sensor2egos_curr
             curr2adjsensor = curr2adjsensor.float()
             curr2adjsensor = torch.split(curr2adjsensor, 1, 1)
+            # [[B, N_view, 4, 4], ...], a list of N_TF elements
             curr2adjsensor = [p.squeeze(1) for p in curr2adjsensor]
             curr2adjsensor.extend([None for _ in range(self.extra_ref_frames)])
             assert len(curr2adjsensor) == self.num_frame
 
         extra = [
-            sensor2keyegos,
-            ego2globals,
+            sensor2keyegos, # [B, N_NF, N_view, 4, 4]
+            ego2globals, # [B, N_NF, N_view, 4, 4]
             intrins.view(B, self.num_frame, N, 3, 3),
             post_rots.view(B, self.num_frame, N, 3, 3),
             post_trans.view(B, self.num_frame, N, 3)
@@ -583,7 +593,7 @@ class BEVStereo4D(BEVDepth4D):
             for i, layer_name in enumerate(self.img_backbone.res_layers):
                 res_layer = getattr(self.img_backbone, layer_name)
                 x = res_layer(x)
-                return x
+                return x # just return L2 level feature map
         else:
             x = self.img_backbone.patch_embed(x)
             hw_shape = (self.img_backbone.patch_embed.DH,
@@ -599,35 +609,45 @@ class BEVStereo4D(BEVDepth4D):
                 out = out.permute(0, 3, 1, 2).contiguous()
                 return out
 
-    def prepare_bev_feat(self, img, sensor2keyego, ego2global, intrin,
-                         post_rot, post_tran, bda, mlp_input, feat_prev_iv,
-                         k2s_sensor, extra_ref_frame):
+    def prepare_bev_feat(self, 
+                         img, # [B, N_view, C, H, W]
+                         sensor2keyego, # [B, N_view, 4, 4]
+                         ego2global, # [B, N_view, 4, 4]
+                         intrin, # [B, N_view, 3, 3]
+                         post_rot, # [B, N_view, 3, 3]
+                         post_tran, # [B, N_view, 3]
+                         bda, # [B, 3, 3]
+                         mlp_input, # # [B, N_view, 27]
+                         feat_prev_iv, # None
+                         k2s_sensor, # [B, N_view, 4, 4] or None(extra_ref_frame=True)
+                         extra_ref_frame): # True
         if extra_ref_frame:
-            stereo_feat = self.extract_stereo_ref_feat(img)
+            stereo_feat = self.extract_stereo_ref_feat(img) # [B*N_view, C, in_H/4, in_W/4]
             return None, None, stereo_feat
         x, stereo_feat = self.image_encoder(img, stereo=True)
         metas = dict(k2s_sensor=k2s_sensor,
                      intrins=intrin,
                      post_rots=post_rot,
                      post_trans=post_tran,
-                     frustum=self.img_view_transformer.cv_frustum.to(x),
+                     frustum=self.img_view_transformer.cv_frustum.to(x), # L2
                      cv_downsample=4,
-                     downsample=self.img_view_transformer.downsample,
+                     downsample=self.img_view_transformer.downsample, # 16, L4 stride
                      grid_config=self.img_view_transformer.grid_config,
                      cv_feat_list=[feat_prev_iv, stereo_feat])
         bev_feat, depth = self.img_view_transformer(
             [x, sensor2keyego, ego2global, intrin, post_rot, post_tran, bda,
              mlp_input], metas)
         if self.pre_process:
+            # [4, 32, 16, 200, 200] torch.float32
             bev_feat = self.pre_process_net(bev_feat)[0]
         return bev_feat, depth, stereo_feat
 
     def extract_img_feat(self,
-                         img,
-                         img_metas,
+                         img, # img_inputs
+                         img_metas, #
                          pred_prev=False,
                          sequential=False,
-                         **kwargs):
+                         **kwargs): #
         if sequential:
             # Todo
             assert False
@@ -643,9 +663,10 @@ class BEVStereo4D(BEVDepth4D):
                 post_rots[fid], post_trans[fid]
             key_frame = fid == 0
             extra_ref_frame = fid == self.num_frame-self.extra_ref_frames
-            if key_frame or self.with_prev:
+            if key_frame or self.with_prev: # self.with_prev is True
                 if self.align_after_view_transfromation:
                     sensor2keyego, ego2global = sensor2keyegos[0], ego2globals[0]
+                # [B, N_view, 27]
                 mlp_input = self.img_view_transformer.get_mlp_input(
                     sensor2keyegos[0], ego2globals[0], intrin,
                     post_rot, post_tran, bda)
@@ -690,6 +711,7 @@ class BEVStereo4D(BEVDepth4D):
                                        [sensor2keyegos[0],
                                         sensor2keyegos[self.num_frame-2-adj_id]],
                                        bda)
+        # [B, C*N_TF(32*9=288), Z, Y, X]
         bev_feat = torch.cat(bev_feat_list, dim=1)
         x = self.bev_encoder(bev_feat)
-        return [x], depth_key_frame
+        return [x], depth_key_frame # [B*N_view, D, H_L4, W_L4]

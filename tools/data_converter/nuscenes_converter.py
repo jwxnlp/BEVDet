@@ -24,10 +24,10 @@ nus_attributes = ('cycle.with_rider', 'cycle.without_rider',
                   'vehicle.parked', 'vehicle.stopped', 'None')
 
 
-def create_nuscenes_infos(root_path,
-                          info_prefix,
-                          version='v1.0-trainval',
-                          max_sweeps=10):
+def create_nuscenes_infos(root_path, # './data/nuscenes'
+                          info_prefix, # 'bevdetv2-nuscenes'
+                          version='v1.0-trainval', # 'v1.0-trainval'
+                          max_sweeps=10): # 0
     """Create info file of nuscene dataset.
 
     Given the raw data, generate its related info file in pkl format.

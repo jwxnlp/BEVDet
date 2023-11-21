@@ -48,11 +48,12 @@ class DefaultFormatBundle(object):
             else:
                 img = np.ascontiguousarray(results['img'].transpose(2, 0, 1))
                 results['img'] = DC(to_tensor(img), stack=True)
+        # gt_labels_3d
         for key in [
                 'proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels',
                 'gt_labels_3d', 'attr_labels', 'pts_instance_mask',
                 'pts_semantic_mask', 'centers2d', 'depths'
-        ]:
+        ]: 
             if key not in results:
                 continue
             if isinstance(results[key], list):
@@ -155,6 +156,7 @@ class Collect3D(object):
         """
         data = {}
         img_metas = {}
+        # box_mode_3d， box_type_3d， sample_idx， pts_filename，
         for key in self.meta_keys:
             if key in results:
                 img_metas[key] = results[key]

@@ -128,12 +128,12 @@ class CustomResNet3D(nn.Module):
 
     def __init__(
             self,
-            numC_input,
-            num_layer=[2, 2, 2],
-            num_channels=None,
-            stride=[2, 2, 2],
-            backbone_output_ids=None,
-            with_cp=False,
+            numC_input, # numC_Trans
+            num_layer=[2, 2, 2], # [1,]
+            num_channels=None, # [numC_Trans, ]
+            stride=[2, 2, 2], # [1,]
+            backbone_output_ids=None, #[0,]
+            with_cp=False, # True
     ):
         super(CustomResNet3D, self).__init__()
         # build backbone
@@ -172,6 +172,10 @@ class CustomResNet3D(nn.Module):
         self.with_cp = with_cp
 
     def forward(self, x):
+        """
+        params:
+            x: bev feature, [B, C, Z, Y, X]
+        """
         feats = []
         x_tmp = x
         for lid, layer in enumerate(self.layers):

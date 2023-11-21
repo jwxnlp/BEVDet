@@ -8,7 +8,7 @@ from pyquaternion import Quaternion
 
 from tools.data_converter import nuscenes_converter as nuscenes_converter
 
-map_name_from_general_to_detection = {
+map_name_from_general_to_detection = { # key: 23, value: 11, add class 'ignore'
     'human.pedestrian.adult': 'pedestrian',
     'human.pedestrian.child': 'pedestrian',
     'human.pedestrian.wheelchair': 'ignore',
@@ -62,14 +62,17 @@ def get_gt(info):
                 not in classes
                 or ann_info['num_lidar_pts'] + ann_info['num_radar_pts'] <= 0):
             continue
+        # wcs
         box = Box(
             ann_info['translation'],
             ann_info['size'],
             Quaternion(ann_info['rotation']),
             velocity=ann_info['velocity'],
         )
+        # wcs --> vcs
         box.translate(trans)
         box.rotate(rot)
+        #--------------------------------------
         box_xyz = np.array(box.center)
         box_dxdydz = np.array(box.wlh)[[1, 0, 2]]
         box_yaw = np.array([box.orientation.yaw_pitch_roll[0]])
@@ -142,7 +145,7 @@ if __name__ == '__main__':
         root_path=root_path,
         info_prefix=extra_tag,
         version=train_version,
-        max_sweeps=0)
+        max_sweeps=0) # why 0, not use termporal fusion?
 
     print('add_ann_infos')
     add_ann_adj_info(extra_tag)

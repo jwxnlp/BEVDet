@@ -394,12 +394,12 @@ class LoadPointsFromFile(object):
     """
 
     def __init__(self,
-                 coord_type,
-                 load_dim=6,
-                 use_dim=[0, 1, 2],
+                 coord_type, # Lidar
+                 load_dim=6, # 5
+                 use_dim=[0, 1, 2], # 5
                  shift_height=False,
                  use_color=False,
-                 file_client_args=dict(backend='disk')):
+                 file_client_args=dict(backend='disk')): #
         self.shift_height = shift_height
         self.use_color = use_color
         if isinstance(use_dim, int):
@@ -451,7 +451,7 @@ class LoadPointsFromFile(object):
         """
         pts_filename = results['pts_filename']
         points = self._load_points(pts_filename)
-        points = points.reshape(-1, self.load_dim)
+        points = points.reshape(-1, self.load_dim) # [N, 5], x,y,z,intensity,ring index
         points = points[:, self.use_dim]
         attribute_dims = None
 
@@ -728,7 +728,7 @@ class PointToMultiViewDepth(object):
         height, width = height // self.downsample, width // self.downsample
         depth_map = torch.zeros((height, width), dtype=torch.float32)
         coor = torch.round(points[:, :2] / self.downsample)
-        depth = points[:, 2]
+        depth = points[:, 2] # depth
         kept1 = (coor[:, 0] >= 0) & (coor[:, 0] < width) & (
             coor[:, 1] >= 0) & (coor[:, 1] < height) & (
                 depth < self.grid_config['depth'][1]) & (
@@ -747,6 +747,7 @@ class PointToMultiViewDepth(object):
 
     def __call__(self, results):
         points_lidar = results['points']
+        # imgs: [N_view*(1+N_adj), C, input_H, input_W]
         imgs, rots, trans, intrins = results['img_inputs'][:4]
         post_rots, post_trans, bda = results['img_inputs'][4:]
         depth_map_list = []
@@ -787,17 +788,19 @@ class PointToMultiViewDepth(object):
             lidar2cam = torch.inverse(camego2global.matmul(cam2camego)).matmul(
                 lidarego2global.matmul(lidar2lidarego))
             lidar2img = cam2img.matmul(lidar2cam)
+            # points_img: [N, 3], points_lidar.tensor, [N, 5]
             points_img = points_lidar.tensor[:, :3].matmul(
                 lidar2img[:3, :3].T) + lidar2img[:3, 3].unsqueeze(0)
             points_img = torch.cat(
                 [points_img[:, :2] / points_img[:, 2:3], points_img[:, 2:3]],
                 1)
+            # z in points_img has not been changed?
             points_img = points_img.matmul(
                 post_rots[cid].T) + post_trans[cid:cid + 1, :]
             depth_map = self.points2depthmap(points_img, imgs.shape[2],
                                              imgs.shape[3])
             depth_map_list.append(depth_map)
-        depth_map = torch.stack(depth_map_list)
+        depth_map = torch.stack(depth_map_list) # [N_view, in_H, in_W]
         results['gt_depth'] = depth_map
         return results
 
@@ -826,9 +829,9 @@ class PrepareImageInputs(object):
 
     def __init__(
         self,
-        data_config,
-        is_train=False,
-        sequential=False,
+        data_config, #
+        is_train=False, # True
+        sequential=False, #True
     ):
         self.is_train = is_train
         self.data_config = data_config
@@ -934,6 +937,7 @@ class PrepareImageInputs(object):
         return sensor2ego, ego2global
 
     def get_inputs(self, results, flip=None, scale=None):
+        """"""
         imgs = []
         sensor2egos = []
         ego2globals = []
@@ -951,7 +955,7 @@ class PrepareImageInputs(object):
             post_tran = torch.zeros(2)
 
             intrin = torch.Tensor(cam_data['cam_intrinsic'])
-
+            # 4x4 transformation matrix
             sensor2ego, ego2global = \
                 self.get_sensor_transforms(results['curr'], cam_name)
             # image view augmentation (resize, crop, horizontal flip, rotate)
@@ -968,13 +972,14 @@ class PrepareImageInputs(object):
                                    rotate=rotate)
 
             # for convenience, make augmentation matrices 3x3
+            # why like this?
             post_tran = torch.zeros(3)
             post_rot = torch.eye(3)
             post_tran[:2] = post_tran2
             post_rot[:2, :2] = post_rot2
 
-            canvas.append(np.array(img))
-            imgs.append(self.normalize_img(img))
+            canvas.append(np.array(img)) # bgr?
+            imgs.append(self.normalize_img(img)) # [C, H, W]
 
             if self.sequential:
                 assert 'adjacent' in results
@@ -1007,13 +1012,13 @@ class PrepareImageInputs(object):
                     sensor2egos.append(sensor2ego)
                     ego2globals.append(ego2global)
 
-        imgs = torch.stack(imgs)
+        imgs = torch.stack(imgs) # [N_view*(1+N_adj(8+1)), C, input_H, input_W] 
 
-        sensor2egos = torch.stack(sensor2egos)
-        ego2globals = torch.stack(ego2globals)
-        intrins = torch.stack(intrins)
-        post_rots = torch.stack(post_rots)
-        post_trans = torch.stack(post_trans)
+        sensor2egos = torch.stack(sensor2egos) # [N_view+N_adj*N_view, 4, 4]
+        ego2globals = torch.stack(ego2globals) # [N_view+N_adj*N_view, 4, 4]
+        intrins = torch.stack(intrins) # [N_view+N_adj*N_view, 3, 3]
+        post_rots = torch.stack(post_rots) # [N_view+N_adj*N_view, 3, 3]
+        post_trans = torch.stack(post_trans) # [N_view+N_adj*N_view, 3]
         results['canvas'] = canvas
         return (imgs, sensor2egos, ego2globals, intrins, post_rots, post_trans)
 
@@ -1049,38 +1054,43 @@ class LoadAnnotationsBEVDepth(object):
         rotate_angle = torch.tensor(rotate_angle / 180 * np.pi)
         rot_sin = torch.sin(rotate_angle)
         rot_cos = torch.cos(rotate_angle)
-        rot_mat = torch.Tensor([[rot_cos, -rot_sin, 0], [rot_sin, rot_cos, 0],
-                                [0, 0, 1]])
-        scale_mat = torch.Tensor([[scale_ratio, 0, 0], [0, scale_ratio, 0],
-                                  [0, 0, scale_ratio]])
-        flip_mat = torch.Tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        rot_mat = torch.Tensor([
+            [rot_cos, -rot_sin, 0], 
+            [rot_sin, rot_cos, 0],
+            [0, 0, 1]])
+        scale_mat = torch.Tensor([
+            [scale_ratio, 0, 0], 
+            [0, scale_ratio, 0],
+            [0, 0, scale_ratio]])
+        flip_mat = torch.Tensor([
+            [1, 0, 0], 
+            [0, 1, 0], 
+            [0, 0, 1]])
         if flip_dx:
-            flip_mat = flip_mat @ torch.Tensor([[-1, 0, 0], [0, 1, 0],
-                                                [0, 0, 1]])
+            flip_mat = flip_mat @ torch.Tensor([
+                [-1, 0, 0], 
+                [0, 1, 0],
+                [0, 0, 1]])
         if flip_dy:
             flip_mat = flip_mat @ torch.Tensor([[1, 0, 0], [0, -1, 0],
                                                 [0, 0, 1]])
         rot_mat = flip_mat @ (scale_mat @ rot_mat)
         if gt_boxes.shape[0] > 0:
-            gt_boxes[:, :3] = (
-                rot_mat @ gt_boxes[:, :3].unsqueeze(-1)).squeeze(-1)
+            gt_boxes[:, :3] = (rot_mat @ gt_boxes[:, :3].unsqueeze(-1)).squeeze(-1)
             gt_boxes[:, 3:6] *= scale_ratio
             gt_boxes[:, 6] += rotate_angle
             if flip_dx:
-                gt_boxes[:,
-                         6] = 2 * torch.asin(torch.tensor(1.0)) - gt_boxes[:,
-                                                                           6]
+                gt_boxes[:,6] = 2 * torch.asin(torch.tensor(1.0)) - gt_boxes[:,6]
             if flip_dy:
                 gt_boxes[:, 6] = -gt_boxes[:, 6]
-            gt_boxes[:, 7:] = (
-                rot_mat[:2, :2] @ gt_boxes[:, 7:].unsqueeze(-1)).squeeze(-1)
+            gt_boxes[:, 7:] = (rot_mat[:2, :2] @ gt_boxes[:, 7:].unsqueeze(-1)).squeeze(-1)
         return gt_boxes, rot_mat
 
     def __call__(self, results):
         gt_boxes, gt_labels = results['ann_infos']
+        # [N, 9], x,y,z,dx,dy,dz,yaw,vx,vy,  [N,]
         gt_boxes, gt_labels = torch.Tensor(gt_boxes), torch.tensor(gt_labels)
-        rotate_bda, scale_bda, flip_dx, flip_dy = self.sample_bda_augmentation(
-        )
+        rotate_bda, scale_bda, flip_dx, flip_dy = self.sample_bda_augmentation()
         bda_mat = torch.zeros(4, 4)
         bda_mat[3, 3] = 1
         gt_boxes, bda_rot = self.bev_transform(gt_boxes, rotate_bda, scale_bda,

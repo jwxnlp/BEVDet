@@ -63,7 +63,7 @@ class NuScenesDataset(Custom3DDataset):
             camera by its name defined in NuScenes.
             Defaults to None, which use the mean of all cameras.
     """
-    NameMapping = {
+    NameMapping = { # key: 14, value: 10
         'movable_object.barrier': 'barrier',
         'vehicle.bicycle': 'bicycle',
         'vehicle.bus.bendy': 'bus',
@@ -124,22 +124,22 @@ class NuScenesDataset(Custom3DDataset):
                'barrier')
 
     def __init__(self,
-                 ann_file,
-                 pipeline=None,
-                 data_root=None,
-                 classes=None,
+                 ann_file, # data_root + 'bevdetv2-nuscenes_infos_train.pkl'
+                 pipeline=None, #
+                 data_root=None, #
+                 classes=None, # nuscenes 10 classes
                  load_interval=1,
                  with_velocity=True,
-                 modality=None,
-                 box_type_3d='LiDAR',
-                 filter_empty_gt=True,
-                 test_mode=False,
+                 modality=None, # 
+                 box_type_3d='LiDAR', #
+                 filter_empty_gt=True, #
+                 test_mode=False, # False
                  eval_version='detection_cvpr_2019',
-                 use_valid_flag=False,
-                 img_info_prototype='mmcv',
-                 multi_adj_frame_id_cfg=None,
+                 use_valid_flag=False, # True
+                 img_info_prototype='mmcv', #
+                 multi_adj_frame_id_cfg=None, #
                  ego_cam='CAM_FRONT',
-                 stereo=False):
+                 stereo=False): # True
         self.load_interval = load_interval
         self.use_valid_flag = use_valid_flag
         super().__init__(
@@ -278,6 +278,7 @@ class NuScenesDataset(Custom3DDataset):
         return input_dict
 
     def get_adj_info(self, info, index):
+        """"""
         info_adj_list = []
         adj_id_list = list(range(*self.multi_adj_frame_id_cfg))
         if self.stereo:
