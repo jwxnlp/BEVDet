@@ -37,12 +37,12 @@ data_config = {
     ],
     'Ncams':
     6,
-    'input_size': (384, 704),
-    'src_size': (900, 1600),
+    'input_size': (384, 704), # h, w
+    'src_size': (900, 1600), # original image size
 
     # Augmentation
     'resize': (-0.06, 0.11),
-    'rot': (-5.4, 5.4),
+    'rot': (-5.4, 5.4), # 角度
     'flip': True,
     'crop_h': (0.0, 0.0),
     'resize_test': 0.00,
@@ -64,26 +64,26 @@ multi_adj_frame_id_cfg = (1, 8+1, 1)
 
 model = dict(
     type='BEVStereo4DOCC',
-    align_after_view_transfromation=False,
-    num_adj=len(range(*multi_adj_frame_id_cfg)),
+    align_after_view_transfromation=False, # BEVDet4D
+    num_adj=len(range(*multi_adj_frame_id_cfg)), # BEVDet4D
     img_backbone=dict(
         # pretrained='torchvision://resnet50',
         type='ResNet',
         depth=50,
         num_stages=4,
-        out_indices=(0, 2, 3),
+        out_indices=(0, 2, 3), # 2^2, 2^4, 2^5
         frozen_stages=-1,
         norm_cfg=dict(type='BN', requires_grad=True),
         norm_eval=False,
         with_cp=True,
-        style='pytorch'),
+        style='pytorch'), # CenterPoint
     img_neck=dict(
         type='CustomFPN',
         in_channels=[1024, 2048],
         out_channels=256,
         num_outs=1,
         start_level=0,
-        out_ids=[0]),
+        out_ids=[0]), # CenterPoint
     img_view_transformer=dict(
         type='LSSViewTransformerBEVStereo',
         grid_config=grid_config,
@@ -98,7 +98,7 @@ model = dict(
                           aspp_mid_channels=96,
                           stereo=True,
                           bias=5.),
-        downsample=16),
+        downsample=16), # L4, BEVDet
     img_bev_encoder_backbone=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
@@ -106,10 +106,10 @@ model = dict(
         with_cp=True,
         num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
         stride=[1,2,2],
-        backbone_output_ids=[0,1,2]),
+        backbone_output_ids=[0,1,2]), # BEVDet
     img_bev_encoder_neck=dict(type='LSSFPN3D',
                               in_channels=numC_Trans*7,
-                              out_channels=numC_Trans),
+                              out_channels=numC_Trans), # BEVDet
     pre_process=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans,
@@ -117,12 +117,12 @@ model = dict(
         num_layer=[1,],
         num_channels=[numC_Trans,],
         stride=[1,],
-        backbone_output_ids=[0,]),
+        backbone_output_ids=[0,]), # BEVDet4D
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
-        loss_weight=1.0),
-    use_mask=True,
+        loss_weight=1.0), # BEVStereo4DOCC
+    use_mask=True, # BEVStereo4DOCC
 )
 
 # Data
@@ -237,7 +237,7 @@ lr_config = dict(
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-runner = dict(type='EpochBasedRunner', max_epochs=100)
+runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
     dict(
@@ -247,5 +247,5 @@ custom_hooks = [
     ),
 ]
 
-load_from="bevdet-r50-4dlongterm-stereo-cbgs.pth"
+load_from="ckpts/bevdet-r50-4dlongterm-stereo-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')
