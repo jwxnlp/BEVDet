@@ -130,6 +130,9 @@ def add_ann_adj_info(extra_tag):
             scene = nuscenes.get('scene', sample['scene_token'])
             dataset['infos'][id]['occ_path'] = \
                 './data/nuscenes/gts/%s/%s'%(scene['name'], info['token'])
+        # train dataset['infos']: 28130
+        # val dataset['infos']: 6019
+        # all: 34149 == lidarseg(v1.0-trainval) files
         with open('./data/nuscenes/%s_infos_%s.pkl' % (extra_tag, set),
                   'wb') as fid:
             pickle.dump(dataset, fid)
