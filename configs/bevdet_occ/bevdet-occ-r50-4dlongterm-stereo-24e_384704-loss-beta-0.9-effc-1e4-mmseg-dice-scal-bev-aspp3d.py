@@ -102,14 +102,15 @@ model = dict(
     img_bev_encoder_backbone=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
-        num_layer=[1, 2, 4],
+        num_layer=[1, 2, 4, 4],
         with_cp=True,
-        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
-        stride=[1,2,2],
-        backbone_output_ids=[0,1,2]), # BEVDet
-    img_bev_encoder_neck=dict(type='LSSFPN3D',
-                              in_channels=numC_Trans*7,
-                              out_channels=numC_Trans), # BEVDet
+        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4,numC_Trans*8],
+        stride=[1,2,2,2],
+        backbone_output_ids=[0,1,2,3]), # BEVDet
+    img_bev_encoder_neck=dict(
+        type='CustomLSSFPN3D',
+        in_channels=numC_Trans*(1+2+4+8),
+        out_channels=numC_Trans), # BEVDet
     pre_process=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans,
@@ -125,12 +126,19 @@ model = dict(
             loss_weight=1.0),
         loss_dice = dict(
             type='DiceLoss',
-            use_sigmoid=False,
-            activate=False,
-            loss_weight=0.3)
+            loss_weight=0.3,
+            use_class_weight=False),
+        loss_scal = dict(
+            type='SceneClassAffinityLoss',
+            loss_weight=0.3,
+            use_class_weight=False)
         ), # BEVStereo4DOCC
     beta=0.9,
     normalize_effective_num=1e4,
+    aspp3d=dict(
+        planes=numC_Trans,
+        dilations_conv_list=[1,2,3,4]
+    ),
     use_mask=True, # BEVStereo4DOCC
 )
 

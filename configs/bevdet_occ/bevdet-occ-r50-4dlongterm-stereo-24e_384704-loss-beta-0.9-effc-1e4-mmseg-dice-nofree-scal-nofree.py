@@ -125,9 +125,12 @@ model = dict(
             loss_weight=1.0),
         loss_dice = dict(
             type='DiceLoss',
-            use_sigmoid=False,
-            activate=False,
-            loss_weight=0.3)
+            loss_weight=0.3,
+            use_free=False),
+        loss_scal = dict(
+            type='SceneClassAffinityLoss',
+            loss_weight=0.3,
+            use_free=False)
         ), # BEVStereo4DOCC
     beta=0.9,
     normalize_effective_num=1e4,

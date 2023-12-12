@@ -108,7 +108,7 @@ model = dict(
         stride=[1,2,2],
         backbone_output_ids=[0,1,2]), # BEVDet
     img_bev_encoder_neck=dict(type='LSSFPN3D',
-                              in_channels=numC_Trans*7,
+                              in_channels=numC_Trans*7, # 2^0+2^1+2^2
                               out_channels=numC_Trans), # BEVDet
     pre_process=dict(
         type='CustomResNet3D',
@@ -130,7 +130,7 @@ model = dict(
             loss_weight=0.3)
         ), # BEVStereo4DOCC
     beta=0.9,
-    normalize_effective_num=1e4,
+    normalize_effective_num=1e3,
     use_mask=True, # BEVStereo4DOCC
 )
 

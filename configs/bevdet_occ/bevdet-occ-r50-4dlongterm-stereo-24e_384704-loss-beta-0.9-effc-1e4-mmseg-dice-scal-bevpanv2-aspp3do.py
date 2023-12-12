@@ -102,14 +102,15 @@ model = dict(
     img_bev_encoder_backbone=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
-        num_layer=[1, 2, 4],
+        num_layer=[1, 2, 4, 4],
         with_cp=True,
-        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
-        stride=[1,2,2],
-        backbone_output_ids=[0,1,2]), # BEVDet
-    img_bev_encoder_neck=dict(type='LSSFPN3D',
-                              in_channels=numC_Trans*7,
-                              out_channels=numC_Trans), # BEVDet
+        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4,numC_Trans*8],
+        stride=[1,2,2,2],
+        backbone_output_ids=[0,1,2,3]), # BEVDet
+    img_bev_encoder_neck=dict(
+        type='CustomLSSPAN3DV2',
+        in_channels=[numC_Trans,numC_Trans*2,numC_Trans*4,numC_Trans*8],
+        out_channels=numC_Trans), # BEVDet
     pre_process=dict(
         type='CustomResNet3D',
         numC_input=numC_Trans,
@@ -125,11 +126,20 @@ model = dict(
             loss_weight=1.0),
         loss_dice = dict(
             type='DiceLoss',
-            use_sigmoid=False,
-            activate=False,
-            loss_weight=0.3)
+            loss_weight=0.3,
+            use_class_weight=False),
+        loss_scal = dict(
+            type='SceneClassAffinityLoss',
+            loss_weight=0.3,
+            use_class_weight=False)
         ), # BEVStereo4DOCC
     beta=0.9,
+    normalize_effective_num=1e4,
+    aspp3d=dict(
+        planes=numC_Trans,
+        dilations_conv_list=[1,2,3,4],
+        use_out_conv=True
+    ),
     use_mask=True, # BEVStereo4DOCC
 )
 
@@ -218,8 +228,8 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=16,
-    workers_per_gpu=8,
+    samples_per_gpu=4,
+    workers_per_gpu=4,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
@@ -245,7 +255,7 @@ lr_config = dict(
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-runner = dict(type='EpochBasedRunner', max_epochs=24)
+runner = dict(type='EpochBasedRunner', max_epochs=36)
 
 custom_hooks = [
     dict(
@@ -254,6 +264,8 @@ custom_hooks = [
         priority='NORMAL',
     ),
 ]
+
+evaluation = dict(interval=4)
 
 load_from="ckpts/bevdet-r50-4dlongterm-stereo-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')

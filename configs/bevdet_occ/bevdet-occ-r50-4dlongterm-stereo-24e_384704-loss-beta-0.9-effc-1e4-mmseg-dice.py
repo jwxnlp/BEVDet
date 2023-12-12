@@ -125,8 +125,6 @@ model = dict(
             loss_weight=1.0),
         loss_dice = dict(
             type='DiceLoss',
-            use_sigmoid=False,
-            activate=False,
             loss_weight=0.3)
         ), # BEVStereo4DOCC
     beta=0.9,

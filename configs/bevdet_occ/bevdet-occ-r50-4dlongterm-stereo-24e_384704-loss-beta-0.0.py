@@ -129,7 +129,7 @@ model = dict(
             activate=False,
             loss_weight=0.3)
         ), # BEVStereo4DOCC
-    beta=0.9,
+    beta=0.0,
     normalize_effective_num=1e4,
     use_mask=True, # BEVStereo4DOCC
 )
