@@ -1,5 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import os
+import os, pickle
 import mmcv
 import torch
 import cv2
@@ -60,7 +60,12 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
         input_dict['occ_gt_path'] = self.data_infos[index]['occ_path']
         return input_dict
 
-    def evaluate(self, occ_results, runner=None, show_dir=None, **eval_kwargs):
+    def evaluate(self, 
+                 occ_results, 
+                 runner=None, 
+                 show_dir=None, 
+                 save_eval_path=None,
+                 **eval_kwargs):
         self.occ_eval_metrics = Metric_mIoU(
             num_classes=18,
             use_lidar_mask=False,
@@ -78,14 +83,20 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
             self.occ_eval_metrics.add_batch(occ_pred, gt_semantics, mask_lidar, mask_camera)
 
             if index%100==0 and show_dir is not None:
+                if not os.path.exists(show_dir):
+                    os.makedirs(show_dir)
                 gt_vis = self.vis_occ(gt_semantics)
                 pred_vis = self.vis_occ(occ_pred)
                 mmcv.imwrite(np.concatenate([gt_vis, pred_vis], axis=1),
-                             os.path.join(show_dir + "%d.jpg"%index))
-
-        return self.occ_eval_metrics.count_miou()
+                             os.path.join(show_dir, "%d.jpg"%index))
+        eval_results = self.occ_eval_metrics.count_miou()
+        if save_eval_path is not None:
+            # print("--- save_eval_path: {}".format(save_eval_path))
+            mmcv.dump(eval_results, save_eval_path)
+        return eval_results
 
     def vis_occ(self, semantics):
+        """"""
         # simple visualization of result in BEV
         semantics_valid = np.logical_not(semantics == 17)
         d = np.arange(16).reshape(1, 1, 16)
@@ -106,3 +117,5 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
         occ_bev_vis = occ_bev_vis.reshape(200, 200, 4)[::-1, ::-1, :3]
         occ_bev_vis = cv2.resize(occ_bev_vis,(400,400))
         return occ_bev_vis
+    
+    

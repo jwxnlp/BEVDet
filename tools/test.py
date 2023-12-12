@@ -178,7 +178,7 @@ def main():
         init_dist(args.launcher, **cfg.dist_params)
 
     test_dataloader_default_args = dict(
-        samples_per_gpu=1, workers_per_gpu=2, dist=distributed, shuffle=False)
+        samples_per_gpu=4, workers_per_gpu=8, dist=distributed, shuffle=False)
 
     # in case the test dataset is concatenated
     if isinstance(cfg.data.test, dict):
@@ -231,23 +231,30 @@ def main():
     elif hasattr(dataset, 'PALETTE'):
         # segmentation dataset has `PALETTE` attribute
         model.PALETTE = dataset.PALETTE
-
-    if not distributed:
-        model = MMDataParallel(model, device_ids=cfg.gpu_ids)
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
-    else:
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False)
-        outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                 args.gpu_collect)
-
+    
     rank, _ = get_dist_info()
+    output_path = args.checkpoint[:-4] + "_pred.pkl" \
+        if args.out is None else args.out
+    if not os.path.exists(output_path):
+        if not distributed:
+            model = MMDataParallel(model, device_ids=cfg.gpu_ids)
+            outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
+        else:
+            model = MMDistributedDataParallel(
+                model.cuda(),
+                device_ids=[torch.cuda.current_device()],
+                broadcast_buffers=False)
+            outputs = multi_gpu_test(model, data_loader, args.tmpdir,
+                                    args.gpu_collect)
+        if rank == 0:
+            print(f'\nwriting results to {output_path}')
+            mmcv.dump(outputs, output_path)
+    else:
+        if rank == 0:
+            print(f'\nloading results from {output_path}')
+            outputs = mmcv.load(output_path)
+
     if rank == 0:
-        if args.out:
-            print(f'\nwriting results to {args.out}')
-            mmcv.dump(outputs, args.out)
         kwargs = {} if args.eval_options is None else args.eval_options
         if args.format_only:
             dataset.format_results(outputs, **kwargs)
@@ -259,7 +266,11 @@ def main():
                     'rule'
             ]:
                 eval_kwargs.pop(key, None)
-            eval_kwargs.update(dict(metric=args.eval, **kwargs))
+            save_eval_path = args.checkpoint[:-4] + "_eval.pkl"
+            eval_kwargs.update(dict(
+                metric=args.eval,
+                save_eval_path = save_eval_path if not os.path.exists(save_eval_path) else None,
+                **kwargs))
             print(dataset.evaluate(outputs, **eval_kwargs))
 
 
