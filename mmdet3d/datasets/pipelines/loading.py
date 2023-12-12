@@ -720,11 +720,17 @@ class LoadAnnotations3D(LoadAnnotations):
 @PIPELINES.register_module()
 class PointToMultiViewDepth(object):
 
-    def __init__(self, grid_config, downsample=1):
+    def __init__(self, 
+                 grid_config, #
+                 downsample=1): # 1
         self.downsample = downsample
         self.grid_config = grid_config
 
-    def points2depthmap(self, points, height, width):
+    def points2depthmap(self, 
+                        points, # [N, 3], x,y,d
+                        height, # H_in
+                        width): # W_in
+        """"""
         height, width = height // self.downsample, width // self.downsample
         depth_map = torch.zeros((height, width), dtype=torch.float32)
         coor = torch.round(points[:, :2] / self.downsample)
@@ -734,18 +740,27 @@ class PointToMultiViewDepth(object):
                 depth < self.grid_config['depth'][1]) & (
                     depth >= self.grid_config['depth'][0])
         coor, depth = coor[kept1], depth[kept1]
+        
         ranks = coor[:, 0] + coor[:, 1] * width
-        sort = (ranks + depth / 100.).argsort()
+        sort = (ranks + depth / 100.).argsort() # max depth is 45, depth/100<0.5
         coor, depth, ranks = coor[sort], depth[sort], ranks[sort]
 
         kept2 = torch.ones(coor.shape[0], device=coor.device, dtype=torch.bool)
-        kept2[1:] = (ranks[1:] != ranks[:-1])
+        kept2[1:] = (ranks[1:] != ranks[:-1]) # every grid get point which has min depth
         coor, depth = coor[kept2], depth[kept2]
         coor = coor.to(torch.long)
         depth_map[coor[:, 1], coor[:, 0]] = depth
         return depth_map
 
     def __call__(self, results):
+        """
+        params:
+            imgs: [N_view*(1+N_adj(8+1)), C, H_in, W_in]
+            intrins: [N_view+N_adj*N_view, 3, 3]
+            post_rots: [N_view+N_adj*N_view, 3, 3]
+            post_trans: [N_view+N_adj*N_view, 3]
+            
+        """
         points_lidar = results['points']
         # imgs: [N_view*(1+N_adj), C, input_H, input_W]
         imgs, rots, trans, intrins = results['img_inputs'][:4]
@@ -784,7 +799,8 @@ class PointToMultiViewDepth(object):
             cam2img = np.eye(4, dtype=np.float32)
             cam2img = torch.from_numpy(cam2img)
             cam2img[:3, :3] = intrins[cid]
-
+            
+            #----------------------------------------------
             lidar2cam = torch.inverse(camego2global.matmul(cam2camego)).matmul(
                 lidarego2global.matmul(lidar2lidarego))
             lidar2img = cam2img.matmul(lidar2cam)
@@ -798,9 +814,9 @@ class PointToMultiViewDepth(object):
             points_img = points_img.matmul(
                 post_rots[cid].T) + post_trans[cid:cid + 1, :]
             depth_map = self.points2depthmap(points_img, imgs.shape[2],
-                                             imgs.shape[3])
+                                             imgs.shape[3]) # [H_down, W_down]
             depth_map_list.append(depth_map)
-        depth_map = torch.stack(depth_map_list) # [N_view, in_H, in_W]
+        depth_map = torch.stack(depth_map_list) # [N_view, H_down, W_down]
         results['gt_depth'] = depth_map
         return results
 

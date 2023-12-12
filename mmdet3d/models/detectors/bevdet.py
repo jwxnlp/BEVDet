@@ -398,7 +398,10 @@ class BEVDet4D(BEVDet):
         x = self.bev_encoder(bev_feat)
         return [x], depth
 
-    def prepare_inputs(self, inputs, stereo=False): # stereo=True
+    def prepare_inputs(self, 
+                       inputs, 
+                       stereo=False): # stereo=True
+        """"""
         # split the inputs into each frame
         B, N, C, H, W = inputs[0].shape # N=N_view+N_adj*N_view
         N = N // self.num_frame # N is N_view after divide
@@ -639,6 +642,7 @@ class BEVStereo4D(BEVDepth4D):
              mlp_input], metas)
         if self.pre_process:
             # [4, 32, 16, 200, 200] torch.float32
+            # pre_process_net is just a BasicBlock3D, stride=1, not change channels
             bev_feat = self.pre_process_net(bev_feat)[0]
         return bev_feat, depth, stereo_feat
 
@@ -648,6 +652,17 @@ class BEVStereo4D(BEVDepth4D):
                          pred_prev=False,
                          sequential=False,
                          **kwargs): #
+        """
+        params:
+            img:
+                imgs: [B, N_view*(1+N_adj(8+1)), C, H_in, W_in]
+                sensor2keyegos: [B, N_view+N_adj*N_view, 4, 4]
+                ego2globals: [B, N_view+N_adj*N_view, 4, 4]
+                intrins: [B, N_view+N_adj*N_view, 3, 3]
+                post_rots: [B, N_view+N_adj*N_view, 3, 3]
+                post_trans: [B, N_view+N_adj*N_view, 3]
+                bda: [B, 3, 3]
+        """
         if sequential:
             # Todo
             assert False
