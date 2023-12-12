@@ -6,11 +6,13 @@ from .multibin_loss import MultiBinLoss
 from .paconv_regularization_loss import PAConvRegularizationLoss
 from .rotated_iou_loss import RotatedIoU3DLoss
 from .uncertain_smooth_l1_loss import UncertainL1Loss, UncertainSmoothL1Loss
-from .loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
+from .dice_loss import DiceLoss
+from .scene_class_affinity_loss import SceneClassAffinityLoss
 
 __all__ = [
     'FocalLoss', 'SmoothL1Loss', 'binary_cross_entropy', 'ChamferDistance',
     'chamfer_distance', 'axis_aligned_iou_loss', 'AxisAlignedIoULoss',
     'PAConvRegularizationLoss', 'UncertainL1Loss', 'UncertainSmoothL1Loss',
-    'MultiBinLoss', 'RotatedIoU3DLoss', 'geo_scal_loss', 'sem_scal_loss'
+    'MultiBinLoss', 'RotatedIoU3DLoss', 
+    'DiceLoss', 'SceneClassAffinityLoss'
 ]
