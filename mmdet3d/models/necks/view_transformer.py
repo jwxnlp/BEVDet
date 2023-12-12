@@ -281,6 +281,7 @@ class LSSViewTransformer(BaseModule):
             self.initial_flag = False
 
     def view_transform_core(self, input, depth, tran_feat):
+        """"""
         B, N, C, H, W = input[0].shape
 
         # Lift-Splat
@@ -369,7 +370,10 @@ class _ASPPModule(nn.Module):
 
 class ASPP(nn.Module):
 
-    def __init__(self, inplanes, mid_channels=256, BatchNorm=nn.BatchNorm2d):
+    def __init__(self, 
+                 inplanes, 
+                 mid_channels=256, 
+                 BatchNorm=nn.BatchNorm2d):
         super(ASPP, self).__init__()
 
         dilations = [1, 6, 12, 18]
@@ -825,7 +829,7 @@ class LSSViewTransformerBEVDepth(LSSViewTransformer):
     def get_depth_loss(self, depth_labels, depth_preds):
         """
         params:
-            depth_labels: [B, N_view, in_H, in_W]
+            depth_labels: [B, N_view, H_in, W_in]
             depth_preds: [B*N_view, D, H_L4, W_L4]
         """
         # [B*N_view*H_L4*W_L4, D]
@@ -843,7 +847,10 @@ class LSSViewTransformerBEVDepth(LSSViewTransformer):
             ).sum() / max(1.0, fg_mask.sum())
         return self.loss_depth_weight * depth_loss
 
-    def forward(self, input, stereo_metas=None):
+    def forward(self, 
+                input, 
+                stereo_metas=None):
+        """"""
         (x, rots, trans, intrins, post_rots, post_trans, bda,
          mlp_input) = input[:8]
 

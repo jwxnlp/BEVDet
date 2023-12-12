@@ -60,12 +60,12 @@ class CustomFPN(BaseModule):
     """
 
     def __init__(self,
-                 in_channels,
-                 out_channels,
-                 num_outs,
-                 start_level=0,
+                 in_channels, # [1024, 2048], channels of L4, L5 features
+                 out_channels, # 256
+                 num_outs, # 1
+                 start_level=0, # 0
                  end_level=-1,
-                 out_ids=[],
+                 out_ids=[], # [0]
                  add_extra_convs=False,
                  relu_before_extra_convs=False,
                  no_norm_on_lateral=False,
@@ -111,7 +111,7 @@ class CustomFPN(BaseModule):
             l_conv = ConvModule(
                 in_channels[i],
                 out_channels,
-                1,
+                1, # kernel_size
                 conv_cfg=conv_cfg,
                 norm_cfg=norm_cfg if not self.no_norm_on_lateral else None,
                 act_cfg=act_cfg,
