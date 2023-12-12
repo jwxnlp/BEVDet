@@ -1,11 +1,12 @@
 # Copyright (c) Phigent Robotics. All rights reserved.
 from .bevdet import BEVStereo4D
+from .aspp3d import ASPP3D
 
 import torch
 from mmdet.models import DETECTORS
-# from mmdet.models.builder import build_loss
+from mmdet.models.builder import build_loss as mmdet_build_loss
+from mmseg.models.builder import build_loss as mmseg_build_loss
 from mmdet3d.models.builder import build_loss
-from mmdet3d.models.losses import geo_scal_loss, sem_scal_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
 from torch import nn
 import numpy as np
@@ -22,6 +23,8 @@ class BEVStereo4DOCC(BEVStereo4D):
                  loss_occ=None, # CrossEntropyLoss
                  out_dim=32,
                  beta=0.9, #
+                 normalize_effective_num=1e4, #
+                 aspp3d=None,
                  use_mask=False, # True
                  num_classes=18,
                  use_predicter=True,
@@ -37,7 +40,8 @@ class BEVStereo4DOCC(BEVStereo4D):
                         stride=1,
                         padding=1,
                         bias=True,
-                        conv_cfg=dict(type='Conv3d'))
+                        conv_cfg=dict(type='Conv3d')) if aspp3d is None else ASPP3D(**aspp3d)
+        
         self.use_predicter =use_predicter
         if use_predicter:
             self.predicter = nn.Sequential(
@@ -48,13 +52,8 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.pts_bbox_head = None
         self.use_mask = use_mask
         self.beta = beta
+        self.normalize_effective_num = normalize_effective_num
         self.num_classes = num_classes
-        # self.loss_occ = build_loss(loss_occ)
-        # self.loss_occ = dict([(loss_name, build_loss(loss_dict)) 
-        #                       for loss_name, loss_dict in loss_occ.items()])
-        for loss_name, loss_dict in loss_occ.items():
-            loss = build_loss(loss_dict)
-            self.__setattr__(loss_name, loss)
             
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
@@ -76,10 +75,24 @@ class BEVStereo4DOCC(BEVStereo4D):
             2307405309], dtype=np.float32)
         assert len(self.class_frequencies) == self.num_classes, "unequal!"
         self.class_weights = torch.from_numpy(
-            (1-self.beta) / (1 - np.power(self.beta, self.class_frequencies/self.class_frequencies.sum()*100))).to(torch.float32)
+            (1-self.beta) / (1 - np.power(self.beta, 
+                self.class_frequencies/self.class_frequencies.sum()*self.normalize_effective_num))).to(torch.float32)
         
-
-        
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        # self.loss_occ = build_loss(loss_occ)
+        # self.loss_occ = dict([(loss_name, build_loss(loss_dict)) 
+        #                       for loss_name, loss_dict in loss_occ.items()])
+        for loss_name, loss_dict in loss_occ.items():
+            if loss_name in ["loss_ce"]:
+                loss = mmdet_build_loss(loss_dict)
+            elif loss_name in ["loss_dice", "loss_scal"]:
+                if loss_dict.pop("use_class_weight", False):
+                    loss_dict.update(dict(
+                        class_weight=self.class_weights))
+                loss = build_loss(loss_dict)
+            else:
+                raise Exception("ERROR: [ {} ]: Novalid Loss!".format(loss_name))
+            self.__setattr__(loss_name, loss)
         return
 
     def loss_single(self,voxel_semantics,mask_camera,preds):
@@ -121,23 +134,39 @@ class BEVStereo4DOCC(BEVStereo4D):
             # voxel_semantics=voxel_semantics.reshape(-1)
             # preds=preds.reshape(-1,self.num_classes)
             # mask_camera = mask_camera.reshape(-1)
-            num_total_samples=mask_camera.sum()
+            # num_total_samples=mask_camera.sum()
             class_weights = self.class_weights.to(preds.device)
             # print("--- class_weights: ")
             
             # cross entropy loss
-            loss_ce=self.__getattr__('loss_ce')(
+            mask = mask_camera.reshape(-1) * class_weights[voxel_semantics].reshape(-1)
+            # num_total_samples=mask.sum()
+            loss_ce = self.__getattr__('loss_ce')(
                 preds.reshape(-1,self.num_classes),
                 voxel_semantics.reshape(-1),
-                mask_camera.reshape(-1) * class_weights[voxel_semantics].reshape(-1), 
-                avg_factor=num_total_samples)
+                mask, avg_factor=mask.sum())
             loss_['loss_ce'] = loss_ce
             # dice loss
-            loss_dice=self.__getattr__('loss_dice')(
-                F.softmax(preds, dim=-1) * mask_camera[..., None].expand(-1, -1, -1, -1, self.num_classes),
-                F.one_hot(voxel_semantics, num_classes=self.num_classes)  * mask_camera[..., None].expand(-1, -1, -1, -1, self.num_classes))
+            # dice loss from mmdet
+            #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # loss_dice=self.__getattr__('loss_dice')(
+            #     F.softmax(preds, dim=-1) * mask_camera[..., None].expand(-1, -1, -1, -1, self.num_classes),
+            #     F.one_hot(voxel_semantics, num_classes=self.num_classes)  * mask_camera[..., None].expand(-1, -1, -1, -1, self.num_classes))
+            
+            # dice loss from mmseg
+            #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # [B*N_view, H_L4, W_L4, 1, S_L4, S_L4]
+            # gt_depths = gt_depths.permute(0, 1, 3, 5, 2, 4).contiguous()
+            
+            loss_dice = self.__getattr__('loss_dice')(
+                preds, voxel_semantics, mask_camera)
             loss_['loss_dice'] = loss_dice
-            # geo_scal_loss
+            
+            # Scene Class Affinity Loss
+            loss_scal = self.__getattr__('loss_scal')(
+                preds, voxel_semantics, mask_camera)
+            loss_['loss_scal'] = loss_scal
+            
         else:
             voxel_semantics = voxel_semantics.reshape(-1)
             preds = preds.reshape(-1, self.num_classes)
@@ -204,7 +233,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         # depth: [B*N_view, D, H_L4, W_L4]
         img_feats, pts_feats, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
-        gt_depth = kwargs['gt_depth'] # [B, N_view, in_H, in_W]
+        gt_depth = kwargs['gt_depth'] # [B, N_view, H_in, W_in]
         losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth # weight = 0.05
