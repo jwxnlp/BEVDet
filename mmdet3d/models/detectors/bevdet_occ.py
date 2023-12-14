@@ -8,6 +8,8 @@ from mmdet.models.builder import build_loss as mmdet_build_loss
 from mmseg.models.builder import build_loss as mmseg_build_loss
 from mmdet3d.models.builder import build_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
+from .. import builder
+
 from torch import nn
 import numpy as np
 import torch.nn.functional as F
@@ -28,6 +30,9 @@ class BEVStereo4DOCC(BEVStereo4D):
                  use_mask=False, # True
                  num_classes=18,
                  use_predicter=True,
+                 use_pvs_predicter=True,
+                 img_pvsnet=None, #
+                 pvs_out_channels=256,
                  class_wise=False,
                  **kwargs):
         super(BEVStereo4DOCC, self).__init__(**kwargs)
@@ -43,12 +48,31 @@ class BEVStereo4DOCC(BEVStereo4D):
                         conv_cfg=dict(type='Conv3d')) if aspp3d is None else ASPP3D(**aspp3d)
         
         self.use_predicter =use_predicter
-        if use_predicter:
+        if self.use_predicter:
             self.predicter = nn.Sequential(
                 nn.Linear(self.out_dim, self.out_dim*2),
                 nn.Softplus(),
                 nn.Linear(self.out_dim*2, num_classes),
             )
+            # self.predicter = nn.Sequential(
+            #     nn.Conv3d(self.out_dim, self.out_dim*2,
+            #               kernel_size=1, stride=1, padding=0),
+            #     nn.Softplus(),
+            #     nn.Conv3d(self.out_dim*2, num_classes,
+            #               kernel_size=1, stride=1, padding=0))
+        if img_pvsnet is not None:
+            self.img_pvsnet = builder.build_neck(img_pvsnet)
+        self.use_pvs_predicter = use_pvs_predicter
+        if self.use_pvs_predicter:
+            self.pvs_predicter = nn.Sequential(
+                    nn.Conv2d(pvs_out_channels, pvs_out_channels,
+                              kernel_size=3, padding=1, bias=True),
+                    # nn.ReLU(inplace=True),
+                    nn.Softplus(),
+                    nn.Conv2d(pvs_out_channels, num_classes-1,
+                              kernel_size=1, stride=1,
+                              padding=0, bias=True))
+            
         self.pts_bbox_head = None
         self.use_mask = use_mask
         self.beta = beta
@@ -83,7 +107,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         # self.loss_occ = dict([(loss_name, build_loss(loss_dict)) 
         #                       for loss_name, loss_dict in loss_occ.items()])
         for loss_name, loss_dict in loss_occ.items():
-            if loss_name in ["loss_ce"]:
+            if loss_name in ["loss_ce", "loss_pvs"]:
                 loss = mmdet_build_loss(loss_dict)
             elif loss_name in ["loss_dice", "loss_scal"]:
                 if loss_dict.pop("use_class_weight", False):
@@ -94,7 +118,13 @@ class BEVStereo4DOCC(BEVStereo4D):
                 raise Exception("ERROR: [ {} ]: Novalid Loss!".format(loss_name))
             self.__setattr__(loss_name, loss)
         return
+    
+    @property
+    def with_img_pvsnet(self):
+        """bool: Whether the detector has a neck in image branch."""
+        return hasattr(self, 'img_pvsnet') and self.img_pvsnet is not None
 
+    
     def loss_single(self,voxel_semantics,mask_camera,preds):
         """
         params:
@@ -118,6 +148,7 @@ class BEVStereo4DOCC(BEVStereo4D):
             loss_occ = self.loss_occ(preds, voxel_semantics,)
             loss_['loss_occ'] = loss_occ
         return loss_
+    
     
     def loss(self,voxel_semantics,mask_camera,preds):
         """
@@ -181,7 +212,7 @@ class BEVStereo4DOCC(BEVStereo4D):
                     rescale=False,
                     **kwargs):
         """Test function without augmentaiton."""
-        img_feats, _, _ = self.extract_feat(
+        img_feats, _, _, _ = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
         # bncdhw->bnwhdc
@@ -231,14 +262,31 @@ class BEVStereo4DOCC(BEVStereo4D):
         # kwargs keys: gt_depth, voxel_semantics, mask_lidar, mask_camera
         # img_feats[0]: [B, C, Z, Y, X]
         # depth: [B*N_view, D, H_L4, W_L4]
-        img_feats, pts_feats, depth = self.extract_feat(
+        # pvs_feat_key_frame: [B, N_view, C, H_L4, W_L4]
+        img_feats, pts_feats, depth, pvs_feat_key_frame = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
         gt_depth = kwargs['gt_depth'] # [B, N_view, H_in, W_in]
         losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth # weight = 0.05
+        
+        #----------------------------------------------------------
+        B, N_view, C, H_L4, W_L4 = pvs_feat_key_frame.shape
+        pvs_feat_key_frame = pvs_feat_key_frame.view(B*N_view, C, H_L4, W_L4)
+        if self.use_pvs_predicter:
+            # [B*N_view, num_classes-1, H_L4, W_L4]
+            pvs_pred = self.pvs_predicter(pvs_feat_key_frame)
+            pvs_pred = pvs_pred.view(B, N_view, -1, H_L4, W_L4)
+            # [B, N_view, H_L4, W_L4, num_classes-1]
+            pvs_pred = pvs_pred.permute(0, 1, 3, 4, 2).contiguous()
+        gt_semantic = kwargs['gt_semantic'] # [B, N_view, H_in, W_in]
+        losses['loss_pvs'] = self.get_semantic_loss(gt_semantic, pvs_pred)
+        
+        #-------------------------------------------------------------------
         # [B, X, Y, Z, C]
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        # # [B, C, X, Y, Z]
+        # occ_pred = self.final_conv(img_feats[0]).permute(0, 1, 4, 3, 2) # bncdhw->bnwhdc
         if self.use_predicter:
             # [B, X, Y, Z, num_classes]
             occ_pred = self.predicter(occ_pred)
@@ -250,3 +298,19 @@ class BEVStereo4DOCC(BEVStereo4D):
         loss_occ = self.loss(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
         return losses
+    
+    def get_semantic_loss(self, labels, preds):
+        """
+        params:
+            labels: [B, N_view, H_in, W_in]
+            preds: # [B, N_view, H_L4, W_L4, num_classes-1]
+        """
+        preds = preds.reshape(-1,self.num_classes-1)
+        labels = labels.long().reshape(-1)
+        fg_mask = labels != -1
+        preds = preds[fg_mask]
+        labels = labels[fg_mask]
+        # num_total_samples=mask.sum()
+        loss_pvs = self.__getattr__('loss_pvs')(
+            preds,labels,avg_factor=fg_mask.sum())
+        return loss_pvs

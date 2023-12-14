@@ -8,10 +8,12 @@ from .pointnet2_fp_neck import PointNetFPNeck
 from .second_fpn import SECONDFPN
 from .view_transformer import LSSViewTransformer, LSSViewTransformerBEVDepth, \
     LSSViewTransformerBEVStereo
+from .pvsnet import PVSNet
 
 __all__ = [
     'FPN', 'SECONDFPN', 'OutdoorImVoxelNeck', 'PointNetFPNeck', 'DLANeck',
     'LSSViewTransformer', 'CustomFPN', 'FPN_LSS', 'LSSViewTransformerBEVDepth',
     'LSSViewTransformerBEVStereo',
-    'CustomLSSFPN3D', 'CustomLSSPAN3D', 'CustomLSSDBFPN3D', 'CustomLSSPAN3DV2', 'CustomLSSUNetDecoder3D'
+    'CustomLSSFPN3D', 'CustomLSSPAN3D', 'CustomLSSDBFPN3D', 'CustomLSSPAN3DV2', 'CustomLSSUNetDecoder3D',
+    'PVSNet'
 ]

@@ -4,6 +4,7 @@ import os
 import mmcv
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from pyquaternion import Quaternion
 
@@ -392,6 +393,96 @@ class LoadPointsFromFile(object):
             https://github.com/open-mmlab/mmcv/blob/master/mmcv/fileio/file_client.py
             for more details. Defaults to dict(backend='disk').
     """
+    challenge_lidarseg_name2idx_mapping = {
+        "void/ignore": 0,
+        "barrier": 1, 
+        "bicycle": 2, 
+        "bus": 3, 
+        "car": 4, 
+        "construction_vehicle": 5,
+        "motorcycle": 6, 
+        "pedestrian": 7, 
+        "traffic_cone": 8, 
+        "trailer": 9, 
+        "truck": 10,
+        "driveable_surface": 11, 
+        "other_flat": 12, 
+        "sidewalk": 13, 
+        "terrain": 14, 
+        "manmade": 15,
+        "vegetation": 16,
+        #"free"
+    }
+    
+    lidarseg_idx2name_mapping = {
+        0: 'noise', 
+        1: 'animal', 
+        2: 'human.pedestrian.adult', 
+        3: 'human.pedestrian.child', 
+        4: 'human.pedestrian.construction_worker', 
+        5: 'human.pedestrian.personal_mobility', 
+        6: 'human.pedestrian.police_officer', 
+        7: 'human.pedestrian.stroller', 
+        8: 'human.pedestrian.wheelchair', 
+        9: 'movable_object.barrier', 
+        10: 'movable_object.debris', 
+        11: 'movable_object.pushable_pullable', 
+        12: 'movable_object.trafficcone', 
+        13: 'static_object.bicycle_rack', 
+        14: 'vehicle.bicycle', 
+        15: 'vehicle.bus.bendy', 
+        16: 'vehicle.bus.rigid', 
+        17: 'vehicle.car', 
+        18: 'vehicle.construction', 
+        19: 'vehicle.emergency.ambulance', 
+        20: 'vehicle.emergency.police', 
+        21: 'vehicle.motorcycle', 
+        22: 'vehicle.trailer', 
+        23: 'vehicle.truck', 
+        24: 'flat.driveable_surface', 
+        25: 'flat.other', 
+        26: 'flat.sidewalk', 
+        27: 'flat.terrain', 
+        28: 'static.manmade', 
+        29: 'static.other', 
+        30: 'static.vegetation', 
+        31: 'vehicle.ego'
+    }
+        
+    name_mapping= {
+        "animal"                              : "void/ignore",	
+        "human.pedestrian.personal_mobility"  : "void/ignore",
+        "human.pedestrian.stroller"           : "void/ignore",
+        "human.pedestrian.wheelchair"         : "void/ignore",
+        "movable_object.debris"               : "void/ignore",
+        "movable_object.pushable_pullable"    : "void/ignore",
+        "static_object.bicycle_rack"          : "void/ignore",
+        "vehicle.emergency.ambulance"         : "void/ignore",
+        "vehicle.emergency.police"            : "void/ignore",
+        "noise"                               : "void/ignore",
+        "static.other"                        : "void/ignore",
+        "vehicle.ego"                         : "void/ignore",
+        "movable_object.barrier"              : "barrier",
+        "vehicle.bicycle"                     : "bicycle",
+        "vehicle.bus.bendy"                   : "bus",
+        "vehicle.bus.rigid"                   : "bus",
+        "vehicle.car"                         : "car",
+        "vehicle.construction"                : "construction_vehicle",
+        "vehicle.motorcycle"                  : "motorcycle",
+        "human.pedestrian.adult"              : "pedestrian",
+        "human.pedestrian.child"              : "pedestrian",
+        "human.pedestrian.construction_worker": "pedestrian",
+        "human.pedestrian.police_officer"     : "pedestrian",
+        "movable_object.trafficcone"          : "traffic_cone",
+        "vehicle.trailer"                     : "trailer",
+        "vehicle.truck"                       : "truck",	
+        "flat.driveable_surface"              : "driveable_surface",
+        "flat.other"                          : "other_flat",
+        "flat.sidewalk"                       : "sidewalk",
+        "flat.terrain"                        : "terrain",
+        "static.manmade"                      : "manmade",
+        "static.vegetation"                   : "vegetation",
+    }
 
     def __init__(self,
                  coord_type, # Lidar
@@ -413,6 +504,12 @@ class LoadPointsFromFile(object):
         self.use_dim = use_dim
         self.file_client_args = file_client_args.copy()
         self.file_client = None
+        
+        #-------------------------------------
+        self.idx_mapping = dict(
+            (k, self.challenge_lidarseg_name2idx_mapping[self.name_mapping[v]])
+            for k, v in self.lidarseg_idx2name_mapping.items())
+        return
 
     def _load_points(self, pts_filename):
         """Private function to load point clouds data.
@@ -436,6 +533,29 @@ class LoadPointsFromFile(object):
                 points = np.fromfile(pts_filename, dtype=np.float32)
 
         return points
+    
+    def _load_labels(self, lidarseg_filename):
+        """Private function to load point clouds data.
+
+        Args:
+            pts_filename (str): Filename of point clouds data.
+
+        Returns:
+            np.ndarray: An array containing point clouds data.
+        """
+        if self.file_client is None:
+            self.file_client = mmcv.FileClient(**self.file_client_args)
+        try:
+            labels_bytes = self.file_client.get(lidarseg_filename)
+            labels = np.frombuffer(labels_bytes, dtype=np.uint8)
+        except ConnectionError:
+            mmcv.check_file_exist(lidarseg_filename)
+            if lidarseg_filename.endswith('.npy'):
+                labels = np.load(lidarseg_filename)
+            else:
+                labels = np.fromfile(lidarseg_filename, dtype=np.uint8)
+        labels = np.vectorize(self.idx_mapping.__getitem__)(labels)
+        return labels
 
     def __call__(self, results):
         """Call function to load points data from file.
@@ -449,10 +569,19 @@ class LoadPointsFromFile(object):
 
                 - points (:obj:`BasePoints`): Point clouds data.
         """
+        # load points
         pts_filename = results['pts_filename']
         points = self._load_points(pts_filename)
         points = points.reshape(-1, self.load_dim) # [N, 5], x,y,z,intensity,ring index
         points = points[:, self.use_dim]
+        # load labels
+        lidarseg_filename = results['lidarseg_filename']
+        labels = self._load_labels(lidarseg_filename) # [N,]
+        assert points.shape[0] == labels.shape[0], \
+            "ERROR: [{} vs. {}]: number of points is not equal to labels!".format(
+                points.shape[0], labels.shape[0])
+        
+        # others
         attribute_dims = None
 
         if self.shift_height:
@@ -478,6 +607,7 @@ class LoadPointsFromFile(object):
         points = points_class(
             points, points_dim=points.shape[-1], attribute_dims=attribute_dims)
         results['points'] = points
+        results['labels'] = torch.from_numpy(labels)
 
         return results
 
@@ -818,6 +948,131 @@ class PointToMultiViewDepth(object):
             depth_map_list.append(depth_map)
         depth_map = torch.stack(depth_map_list) # [N_view, H_down, W_down]
         results['gt_depth'] = depth_map
+        return results
+
+@PIPELINES.register_module()
+class PointToMultiViewSemantic(object):
+
+    def __init__(self, 
+                 grid_config, #
+                 downsample=1, # 1
+                 num_classes=17
+                 ):
+        self.downsample = downsample
+        self.grid_config = grid_config
+        self.num_classes = num_classes
+        return
+
+    def points2semanticmap(self, 
+                           points, # [N, 3], x,y,d
+                           labels, # [N,]
+                           height, # H_in
+                           width): # W_in
+        """"""
+        height, width = height // self.downsample, width // self.downsample
+        semantic_map = -torch.ones((height, width), dtype=torch.float32)
+        coor = torch.round(points[:, :2] / self.downsample)
+        kept1 = (coor[:, 0] >= 0) & (coor[:, 0] < width) & (
+            coor[:, 1] >= 0) & (coor[:, 1] < height)
+        coor, labels = coor[kept1], labels[kept1]
+        
+        ranks = coor[:, 0] + coor[:, 1] * width
+        sort = (ranks + 0.).argsort() # max depth is 45, depth/100<0.5
+        coor, labels, ranks = coor[sort], labels[sort], ranks[sort]
+
+        kept2 = torch.ones(coor.shape[0], device=coor.device, dtype=torch.bool)
+        kept2[1:] = (ranks[1:] != ranks[:-1]) # every grid get point which has min depth
+        coor = coor[kept2]
+        # coor, depth = coor[kept2], depth[kept2]
+        # coor = coor.to(torch.long)
+        # depth_map[coor[:, 1], coor[:, 0]] = depth
+        interval_starts = torch.where(kept2)[0].int()
+        interval_lengths = torch.zeros_like(interval_starts)
+        interval_lengths[:-1] = interval_starts[1:] - interval_starts[:-1]
+        interval_lengths[-1] = kept2.shape[0] - interval_starts[-1]
+        # [N, N_cls]
+        one_hot_labels = F.one_hot(
+            torch.clamp(labels.long(), 0, self.num_classes - 1),
+            num_classes=self.num_classes)
+        # intervals = torch.zeros()
+        # intervals = torch.zeros(
+        #     (interval_lengths.shape[0], interval_lengths.max()), 
+        #     dtype=input.dtype, device=input.device)
+        intervals = torch.split(one_hot_labels, interval_lengths.tolist())
+        labels = torch.as_tensor(
+            [torch.argmax(torch.sum(interval, dim=0)) for interval in intervals],
+            dtype=labels.dtype, device=labels.device)
+        coor = coor.to(torch.long)
+        semantic_map[coor[:, 1], coor[:, 0]] = labels.to(semantic_map.dtype)
+        return semantic_map
+
+    def __call__(self, results):
+        """
+        params:
+            imgs: [N_view*(1+N_adj(8+1)), C, H_in, W_in]
+            intrins: [N_view+N_adj*N_view, 3, 3]
+            post_rots: [N_view+N_adj*N_view, 3, 3]
+            post_trans: [N_view+N_adj*N_view, 3]
+            
+        """
+        points_lidar = results['points']
+        labels = results['labels']
+        # imgs: [N_view*(1+N_adj), C, input_H, input_W]
+        imgs, rots, trans, intrins = results['img_inputs'][:4]
+        post_rots, post_trans, bda = results['img_inputs'][4:]
+        semantic_map_list = []
+        for cid in range(len(results['cam_names'])):
+            cam_name = results['cam_names'][cid]
+            lidar2lidarego = np.eye(4, dtype=np.float32)
+            lidar2lidarego[:3, :3] = Quaternion(
+                results['curr']['lidar2ego_rotation']).rotation_matrix
+            lidar2lidarego[:3, 3] = results['curr']['lidar2ego_translation']
+            lidar2lidarego = torch.from_numpy(lidar2lidarego)
+
+            lidarego2global = np.eye(4, dtype=np.float32)
+            lidarego2global[:3, :3] = Quaternion(
+                results['curr']['ego2global_rotation']).rotation_matrix
+            lidarego2global[:3, 3] = results['curr']['ego2global_translation']
+            lidarego2global = torch.from_numpy(lidarego2global)
+
+            cam2camego = np.eye(4, dtype=np.float32)
+            cam2camego[:3, :3] = Quaternion(
+                results['curr']['cams'][cam_name]
+                ['sensor2ego_rotation']).rotation_matrix
+            cam2camego[:3, 3] = results['curr']['cams'][cam_name][
+                'sensor2ego_translation']
+            cam2camego = torch.from_numpy(cam2camego)
+
+            camego2global = np.eye(4, dtype=np.float32)
+            camego2global[:3, :3] = Quaternion(
+                results['curr']['cams'][cam_name]
+                ['ego2global_rotation']).rotation_matrix
+            camego2global[:3, 3] = results['curr']['cams'][cam_name][
+                'ego2global_translation']
+            camego2global = torch.from_numpy(camego2global)
+
+            cam2img = np.eye(4, dtype=np.float32)
+            cam2img = torch.from_numpy(cam2img)
+            cam2img[:3, :3] = intrins[cid]
+            
+            #----------------------------------------------
+            lidar2cam = torch.inverse(camego2global.matmul(cam2camego)).matmul(
+                lidarego2global.matmul(lidar2lidarego))
+            lidar2img = cam2img.matmul(lidar2cam)
+            # points_img: [N, 3], points_lidar.tensor, [N, 5]
+            points_img = points_lidar.tensor[:, :3].matmul(
+                lidar2img[:3, :3].T) + lidar2img[:3, 3].unsqueeze(0)
+            points_img = torch.cat(
+                [points_img[:, :2] / points_img[:, 2:3], points_img[:, 2:3]],
+                1)
+            # z in points_img has not been changed?
+            points_img = points_img.matmul(
+                post_rots[cid].T) + post_trans[cid:cid + 1, :]
+            semantic_map = self.points2semanticmap(points_img, labels, imgs.shape[2],
+                                             imgs.shape[3]) # [H_down, W_down]
+            semantic_map_list.append(semantic_map)
+        semantic_map = torch.stack(semantic_map_list) # [N_view, H_down, W_down]
+        results['gt_semantic'] = semantic_map
         return results
 
 

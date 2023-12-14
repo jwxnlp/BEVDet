@@ -1,5 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import pickle
+import pickle, os
 
 import numpy as np
 from nuscenes import NuScenes
@@ -102,7 +102,7 @@ def nuscenes_data_prep(root_path, info_prefix, version, max_sweeps=10):
         root_path, info_prefix, version=version, max_sweeps=max_sweeps)
 
 
-def add_ann_adj_info(extra_tag):
+def add_ann_adj_info(extra_tag, with_lidar_seg=False):
     nuscenes_version = 'v1.0-trainval'
     dataroot = './data/nuscenes/'
     nuscenes = NuScenes(nuscenes_version, dataroot)
@@ -126,8 +126,14 @@ def add_ann_adj_info(extra_tag):
             dataset['infos'][id]['ann_infos'] = ann_infos
             dataset['infos'][id]['ann_infos'] = get_gt(dataset['infos'][id])
             dataset['infos'][id]['scene_token'] = sample['scene_token']
+            if with_lidar_seg:
+                lidar_sd_token = sample['data']['LIDAR_TOP']
+                dataset['infos'][id]['lidarseg_filename'] =  os.path.join(
+                    nuscenes.dataroot,
+                    nuscenes.get('lidarseg', lidar_sd_token)['filename'])
 
             scene = nuscenes.get('scene', sample['scene_token'])
+            dataset['infos'][id]['scene_name'] = scene['name']
             dataset['infos'][id]['occ_path'] = \
                 './data/nuscenes/gts/%s/%s'%(scene['name'], info['token'])
         # train dataset['infos']: 28130
@@ -151,4 +157,4 @@ if __name__ == '__main__':
         max_sweeps=0) # why 0, not use termporal fusion?
 
     print('add_ann_infos')
-    add_ann_adj_info(extra_tag)
+    add_ann_adj_info(extra_tag, with_lidar_seg=True)

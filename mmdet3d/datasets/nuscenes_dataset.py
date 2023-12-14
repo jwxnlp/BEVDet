@@ -234,6 +234,7 @@ class NuScenesDataset(Custom3DDataset):
         input_dict = dict(
             sample_idx=info['token'],
             pts_filename=info['lidar_path'],
+            lidarseg_filename=info.get('lidarseg_filename', 'None'),
             sweeps=info['sweeps'],
             timestamp=info['timestamp'] / 1e6,
         )

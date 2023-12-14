@@ -48,9 +48,13 @@ class BEVDet(CenterPoint):
             x = self.img_neck(x)
             if type(x) in [list, tuple]:
                 x = x[0]
+        if self.with_img_pvsnet:
+            pvs_feat = self.img_pvsnet(x)
+        x = x + pvs_feat
         _, output_dim, ouput_H, output_W = x.shape
         x = x.view(B, N, output_dim, ouput_H, output_W)
-        return x, stereo_feat
+        pvs_feat = pvs_feat.view(B, N, output_dim, ouput_H, output_W)
+        return x, pvs_feat, stereo_feat
 
     @force_fp32()
     def bev_encoder(self, x):
@@ -90,9 +94,9 @@ class BEVDet(CenterPoint):
 
     def extract_feat(self, points, img, img_metas, **kwargs):
         """Extract features from images and points."""
-        img_feats, depth = self.extract_img_feat(img, img_metas, **kwargs)
+        img_feats, depth, pv_feat = self.extract_img_feat(img, img_metas, **kwargs)
         pts_feats = None
-        return (img_feats, pts_feats, depth)
+        return (img_feats, pts_feats, depth, pv_feat)
 
     def forward_train(self,
                       points=None,
@@ -626,8 +630,8 @@ class BEVStereo4D(BEVDepth4D):
                          extra_ref_frame): # True
         if extra_ref_frame:
             stereo_feat = self.extract_stereo_ref_feat(img) # [B*N_view, C, in_H/4, in_W/4]
-            return None, None, stereo_feat
-        x, stereo_feat = self.image_encoder(img, stereo=True)
+            return None, None, None, stereo_feat
+        x, pvs_feat, stereo_feat = self.image_encoder(img, stereo=True)
         metas = dict(k2s_sensor=k2s_sensor,
                      intrins=intrin,
                      post_rots=post_rot,
@@ -644,7 +648,7 @@ class BEVStereo4D(BEVDepth4D):
             # [4, 32, 16, 200, 200] torch.float32
             # pre_process_net is just a BasicBlock3D, stride=1, not change channels
             bev_feat = self.pre_process_net(bev_feat)[0]
-        return bev_feat, depth, stereo_feat
+        return bev_feat, depth, pvs_feat, stereo_feat
 
     def extract_img_feat(self,
                          img, # img_inputs
@@ -690,12 +694,13 @@ class BEVStereo4D(BEVDepth4D):
                                feat_prev_iv, curr2adjsensor[fid],
                                extra_ref_frame)
                 if key_frame:
-                    bev_feat, depth, feat_curr_iv = \
+                    bev_feat, depth, pvs_feat, feat_curr_iv = \
                         self.prepare_bev_feat(*inputs_curr)
                     depth_key_frame = depth
+                    pvs_feat_key_frame = pvs_feat
                 else:
                     with torch.no_grad():
-                        bev_feat, depth, feat_curr_iv = \
+                        bev_feat, depth, pvs_feat, feat_curr_iv = \
                             self.prepare_bev_feat(*inputs_curr)
                 if not extra_ref_frame:
                     bev_feat_list.append(bev_feat)
@@ -729,4 +734,6 @@ class BEVStereo4D(BEVDepth4D):
         # [B, C*N_TF(32*9=288), Z, Y, X]
         bev_feat = torch.cat(bev_feat_list, dim=1)
         x = self.bev_encoder(bev_feat)
-        return [x], depth_key_frame # [B*N_view, D, H_L4, W_L4]
+        # depth_key_frame: [B*N_view, D, H_L4, W_L4]
+        # pvs_feat_key_frame: [B, N_view, C, H_L4, W_L4]
+        return [x], depth_key_frame, pvs_feat_key_frame
