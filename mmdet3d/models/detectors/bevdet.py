@@ -421,12 +421,12 @@ class BEVDet4D(BEVDet):
         ego2globals = ego2globals.view(B, self.num_frame, N, 4, 4)
 
         # calculate the transformation from sweep sensor to key ego
-        # [B, 1, 1, 4, 4], keyego: CAM_FRONT's ego frame
+        # [B, 1, 1, 4, 4], keyego: current CAM_FRONT's ego frame
         keyego2global = ego2globals[:, 0, 0, ...].unsqueeze(1).unsqueeze(1)
         global2keyego = torch.inverse(keyego2global.double())
         sensor2keyegos = \
             global2keyego @ ego2globals.double() @ sensor2egos.double()
-        sensor2keyegos = sensor2keyegos.float()
+        sensor2keyegos = sensor2keyegos.float() # [B, N_ATF, N_view, 4, 4]
 
         curr2adjsensor = None
         if stereo:
@@ -675,8 +675,16 @@ class BEVStereo4D(BEVDepth4D):
         """Extract features of images."""
         bev_feat_list = []
         depth_key_frame = None
+        pvs_feat_key_frame = None
         feat_prev_iv = None
         for fid in range(self.num_frame-1, -1, -1):
+            # img: [B, N_view, C, H, W]
+            # sensor2keyego: [B, N_view, 4, 4]
+            # ego2global: [B, N_view, 4, 4]
+            # intrin: [B, N_view, 3, 3]
+            # post_rot: [B, N_view, 3, 3]
+            # post_tran: [B, N_view, 3]
+            # bda: [B, 3, 3]
             img, sensor2keyego, ego2global, intrin, post_rot, post_tran = \
                 imgs[fid], sensor2keyegos[fid], ego2globals[fid], intrins[fid], \
                 post_rots[fid], post_trans[fid]
@@ -689,6 +697,7 @@ class BEVStereo4D(BEVDepth4D):
                 mlp_input = self.img_view_transformer.get_mlp_input(
                     sensor2keyegos[0], ego2globals[0], intrin,
                     post_rot, post_tran, bda)
+                # curr2adjsensor[fid]: [B, N_view, 4, 4]
                 inputs_curr = (img, sensor2keyego, ego2global, intrin,
                                post_rot, post_tran, bda, mlp_input,
                                feat_prev_iv, curr2adjsensor[fid],

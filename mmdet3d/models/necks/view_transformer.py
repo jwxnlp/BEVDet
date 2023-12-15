@@ -498,6 +498,7 @@ class DepthNet(nn.Module):
                  use_aspp=True,
                  with_cp=False, # True
                  stereo=False, # True
+                 num_downsample=2,
                  bias=0.0, # 5.
                  aspp_mid_channels=-1): # 96
         super(DepthNet, self).__init__()
@@ -522,7 +523,7 @@ class DepthNet(nn.Module):
             downsample = nn.Conv2d(depth_conv_input_channels,
                                     mid_channels, 1, 1, 0)
             cost_volumn_net = []
-            for stage in range(int(2)):
+            for stage in range(int(num_downsample)):
                 cost_volumn_net.extend([
                     nn.Conv2d(depth_channels, depth_channels, kernel_size=3,
                               stride=2, padding=1),
@@ -870,6 +871,7 @@ class LSSViewTransformerBEVStereo(LSSViewTransformerBEVDepth):
 
     def __init__(self,  **kwargs):
         super(LSSViewTransformerBEVStereo, self).__init__(**kwargs)
+        # [D, H_L2, W_L2, 3], (x,y,d), x,y is in kwargs['input_size']
         self.cv_frustum = self.create_frustum(kwargs['grid_config']['depth'],
                                               kwargs['input_size'],
                                               downsample=4) # L2
