@@ -40,6 +40,7 @@ class BEVDet(CenterPoint):
         imgs = imgs.view(B * N, C, imH, imW)
         x = self.img_backbone(imgs)
         stereo_feat = None
+        pvs_feat = None
         if stereo:
             stereo_feat = x[0] # L2 feature map
             x = x[1:] # L4,L5 feature maps
@@ -50,10 +51,11 @@ class BEVDet(CenterPoint):
                 x = x[0]
         if self.with_img_pvsnet:
             pvs_feat = self.img_pvsnet(x)
-        x = x + pvs_feat
+            x = x + pvs_feat
         _, output_dim, ouput_H, output_W = x.shape
         x = x.view(B, N, output_dim, ouput_H, output_W)
-        pvs_feat = pvs_feat.view(B, N, output_dim, ouput_H, output_W)
+        if self.with_img_pvsnet:
+            pvs_feat = pvs_feat.view(B, N, output_dim, ouput_H, output_W)
         return x, pvs_feat, stereo_feat
 
     @force_fp32()
@@ -636,11 +638,12 @@ class BEVStereo4D(BEVDepth4D):
                      intrins=intrin,
                      post_rots=post_rot,
                      post_trans=post_tran,
-                     frustum=self.img_view_transformer.cv_frustum.to(x), # L2
-                     cv_downsample=4,
+                     frustum=self.img_view_transformer.cv_frustum.to(x), # [D, H_L2, W_L2, 3], L2
+                     cv_downsample=4, # L2
                      downsample=self.img_view_transformer.downsample, # 16, L4 stride
                      grid_config=self.img_view_transformer.grid_config,
                      cv_feat_list=[feat_prev_iv, stereo_feat])
+        # [4, 32, 16, 200, 200], [B, C, Z, Y, X]
         bev_feat, depth = self.img_view_transformer(
             [x, sensor2keyego, ego2global, intrin, post_rot, post_tran, bda,
              mlp_input], metas)

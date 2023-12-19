@@ -30,7 +30,6 @@ class BEVStereo4DOCC(BEVStereo4D):
                  use_mask=False, # True
                  num_classes=18,
                  use_predicter=True,
-                 use_pvs_predicter=True,
                  img_pvsnet=None, #
                  pvs_out_channels=256,
                  class_wise=False,
@@ -46,7 +45,8 @@ class BEVStereo4DOCC(BEVStereo4D):
                         padding=1,
                         bias=True,
                         conv_cfg=dict(type='Conv3d')) if aspp3d is None else ASPP3D(**aspp3d)
-        
+        # occupancy semantic head
+        #------------------------------------------------------------------------
         self.use_predicter =use_predicter
         if self.use_predicter:
             self.predicter = nn.Sequential(
@@ -60,10 +60,14 @@ class BEVStereo4DOCC(BEVStereo4D):
             #     nn.Softplus(),
             #     nn.Conv3d(self.out_dim*2, num_classes,
             #               kernel_size=1, stride=1, padding=0))
-        if img_pvsnet is not None:
-            self.img_pvsnet = builder.build_neck(img_pvsnet)
-        self.use_pvs_predicter = use_pvs_predicter
+        
+        # PV Semantic Components
+        #----------------------------------------------------------------------------
+        self.use_pvs_predicter = img_pvsnet is not None
         if self.use_pvs_predicter:
+            # build semantic neck
+            self.img_pvsnet = builder.build_neck(img_pvsnet)
+            # build semantic head
             self.pvs_predicter = nn.Sequential(
                     nn.Conv2d(pvs_out_channels, pvs_out_channels,
                               kernel_size=3, padding=1, bias=True),
@@ -124,6 +128,9 @@ class BEVStereo4DOCC(BEVStereo4D):
         """bool: Whether the detector has a neck in image branch."""
         return hasattr(self, 'img_pvsnet') and self.img_pvsnet is not None
 
+    def with_specific_component(self, component_name):
+        """Whether the model owns a specific component"""
+        return getattr(self, component_name, None) is not None
     
     def loss_single(self,voxel_semantics,mask_camera,preds):
         """
@@ -150,7 +157,10 @@ class BEVStereo4DOCC(BEVStereo4D):
         return loss_
     
     
-    def loss(self,voxel_semantics,mask_camera,preds):
+    def loss(self,
+             voxel_semantics,
+             mask_camera,
+             preds):
         """
         params:
             voxel_semantics: [B, X, Y, Z]
@@ -168,15 +178,15 @@ class BEVStereo4DOCC(BEVStereo4D):
             # num_total_samples=mask_camera.sum()
             class_weights = self.class_weights.to(preds.device)
             # print("--- class_weights: ")
-            
-            # cross entropy loss
-            mask = mask_camera.reshape(-1) * class_weights[voxel_semantics].reshape(-1)
-            # num_total_samples=mask.sum()
-            loss_ce = self.__getattr__('loss_ce')(
-                preds.reshape(-1,self.num_classes),
-                voxel_semantics.reshape(-1),
-                mask, avg_factor=mask.sum())
-            loss_['loss_ce'] = loss_ce
+            if self.with_specific_component('loss_ce'):
+                # cross entropy loss
+                mask = mask_camera.reshape(-1) * class_weights[voxel_semantics].reshape(-1)
+                # num_total_samples=mask.sum()
+                loss_ce = self.__getattr__('loss_ce')(
+                    preds.reshape(-1,self.num_classes),
+                    voxel_semantics.reshape(-1),
+                    mask, avg_factor=mask.sum())
+                loss_['loss_ce'] = loss_ce
             # dice loss
             # dice loss from mmdet
             #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -188,21 +198,19 @@ class BEVStereo4DOCC(BEVStereo4D):
             #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
             # [B*N_view, H_L4, W_L4, 1, S_L4, S_L4]
             # gt_depths = gt_depths.permute(0, 1, 3, 5, 2, 4).contiguous()
+            if self.with_specific_component('loss_dice'):
+                loss_dice = self.__getattr__('loss_dice')(
+                    preds, voxel_semantics, mask_camera)
+                loss_['loss_dice'] = loss_dice
             
-            loss_dice = self.__getattr__('loss_dice')(
-                preds, voxel_semantics, mask_camera)
-            loss_['loss_dice'] = loss_dice
-            
-            # Scene Class Affinity Loss
-            loss_scal = self.__getattr__('loss_scal')(
-                preds, voxel_semantics, mask_camera)
-            loss_['loss_scal'] = loss_scal
+            if self.with_specific_component('loss_scal'):
+                # Scene Class Affinity Loss
+                loss_scal = self.__getattr__('loss_scal')(
+                    preds, voxel_semantics, mask_camera)
+                loss_['loss_scal'] = loss_scal
             
         else:
-            voxel_semantics = voxel_semantics.reshape(-1)
-            preds = preds.reshape(-1, self.num_classes)
-            loss_ce = self.loss_occ['loss_ce'](preds, voxel_semantics,)
-            loss_['loss_ce'] = loss_ce
+            raise Exception("ERROR: Please use mask_camera!")
         return loss_
 
     def simple_test(self,
@@ -271,16 +279,20 @@ class BEVStereo4DOCC(BEVStereo4D):
         losses['loss_depth'] = loss_depth # weight = 0.05
         
         #----------------------------------------------------------
-        B, N_view, C, H_L4, W_L4 = pvs_feat_key_frame.shape
-        pvs_feat_key_frame = pvs_feat_key_frame.view(B*N_view, C, H_L4, W_L4)
-        if self.use_pvs_predicter:
-            # [B*N_view, num_classes-1, H_L4, W_L4]
-            pvs_pred = self.pvs_predicter(pvs_feat_key_frame)
-            pvs_pred = pvs_pred.view(B, N_view, -1, H_L4, W_L4)
-            # [B, N_view, H_L4, W_L4, num_classes-1]
-            pvs_pred = pvs_pred.permute(0, 1, 3, 4, 2).contiguous()
-        gt_semantic = kwargs['gt_semantic'] # [B, N_view, H_in, W_in]
-        losses['loss_pvs'] = self.get_semantic_loss(gt_semantic, pvs_pred)
+        if self.with_img_pvsnet:
+            B, N_view, C, H_L4, W_L4 = pvs_feat_key_frame.shape
+            pvs_feat_key_frame = pvs_feat_key_frame.view(B*N_view, C, H_L4, W_L4)
+            if self.use_pvs_predicter:
+                # [B*N_view, num_classes-1, H_L4, W_L4]
+                pvs_pred = self.pvs_predicter(pvs_feat_key_frame)
+                pvs_pred = pvs_pred.view(B, N_view, -1, H_L4, W_L4)
+                # [B, N_view, H_L4, W_L4, num_classes-1]
+                pvs_pred = pvs_pred.permute(0, 1, 3, 4, 2).contiguous()
+            gt_semantic = kwargs['gt_semantic'] # [B, N_view, H_in, W_in]
+            losses['loss_pvs'] = self.get_semantic_loss(gt_semantic, pvs_pred)
+        else:
+            assert pvs_feat_key_frame is None, \
+                "ERROR: pvs_feat_key_frame is not None when self.with_img_pvsnet is False"
         
         #-------------------------------------------------------------------
         # [B, X, Y, Z, C]
