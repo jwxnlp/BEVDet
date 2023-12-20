@@ -629,7 +629,8 @@ class BEVStereo4D(BEVDepth4D):
                          mlp_input, # # [B, N_view, 27]
                          feat_prev_iv, # None
                          k2s_sensor, # [B, N_view, 4, 4] or None(extra_ref_frame=True)
-                         extra_ref_frame): # True
+                         extra_ref_frame, # True
+                         img_metas):
         if extra_ref_frame:
             stereo_feat = self.extract_stereo_ref_feat(img) # [B*N_view, C, in_H/4, in_W/4]
             return None, None, None, stereo_feat
@@ -643,10 +644,35 @@ class BEVStereo4D(BEVDepth4D):
                      downsample=self.img_view_transformer.downsample, # 16, L4 stride
                      grid_config=self.img_view_transformer.grid_config,
                      cv_feat_list=[feat_prev_iv, stereo_feat])
-        # [4, 32, 16, 200, 200], [B, C, Z, Y, X]
-        bev_feat, depth = self.img_view_transformer(
+        # forward projection
+        #-------------------------------------------------------
+        # bev_feat: [4, 32, 16, 200, 200], [B, C, Z, Y, X]
+        # depth: [B*N_view, D, H_LX, W_LX], LX mean a level in {L3, L4}
+        # context: [B*N_view, C, H_LX, W_LX]
+        bev_feat, depth, context = self.img_view_transformer(
             [x, sensor2keyego, ego2global, intrin, post_rot, post_tran, bda,
              mlp_input], metas)
+        
+        # add backforward projection
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        if self.with_specific_component('backward_projection'):
+            cam_params = (sensor2keyego[..., :3, :3], sensor2keyego[..., :3, 3], 
+                          intrin, post_rot,  post_tran, bda)
+            # [B, E, bev_h, bev_w]
+            B, N_view = img.shape[:2]
+            C, H_LX, W_LX = context.shape[-3:]
+            D, H_LX, W_LX = depth.shape[-3:]
+            lss_bev = bev_feat.permute(0, 1, 3, 4, 2).contiguous()
+            bev_feat_refined = self.backward_projection(
+                [context.view(B, N_view, C, H_LX, W_LX)], # one level
+                img_metas,
+                lss_bev=lss_bev.mean(-1), # [B, con_C, Y, X], # [B, con_C, Y, X, Z]
+                cam_params=cam_params,
+                bev_mask=None,
+                gt_bboxes_3d=None,
+                pred_img_depth=depth.view(B, N_view, D, H_LX, W_LX))
+            bev_feat = bev_feat_refined[:, :, None, :, :] + bev_feat
+        
         if self.pre_process:
             # [4, 32, 16, 200, 200] torch.float32
             # pre_process_net is just a BasicBlock3D, stride=1, not change channels
@@ -704,7 +730,7 @@ class BEVStereo4D(BEVDepth4D):
                 inputs_curr = (img, sensor2keyego, ego2global, intrin,
                                post_rot, post_tran, bda, mlp_input,
                                feat_prev_iv, curr2adjsensor[fid],
-                               extra_ref_frame)
+                               extra_ref_frame, img_metas)
                 if key_frame:
                     bev_feat, depth, pvs_feat, feat_curr_iv = \
                         self.prepare_bev_feat(*inputs_curr)

@@ -33,6 +33,7 @@ class BEVStereo4DOCC(BEVStereo4D):
                  img_pvsnet=None, #
                  pvs_out_channels=256,
                  class_wise=False,
+                 backward_projection=None,
                  **kwargs):
         super(BEVStereo4DOCC, self).__init__(**kwargs)
         self.out_dim = out_dim
@@ -76,7 +77,9 @@ class BEVStereo4DOCC(BEVStereo4D):
                     nn.Conv2d(pvs_out_channels, num_classes-1,
                               kernel_size=1, stride=1,
                               padding=0, bias=True))
-            
+        # BEVFormer init
+        self.backward_projection = builder.build_head(backward_projection) if backward_projection else None
+
         self.pts_bbox_head = None
         self.use_mask = use_mask
         self.beta = beta

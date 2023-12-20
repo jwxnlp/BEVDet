@@ -863,7 +863,7 @@ class LSSViewTransformerBEVDepth(LSSViewTransformer):
         tran_feat = x[:, self.D:self.D + self.out_channels, ...]
         depth = depth_digit.softmax(dim=1)
         bev_feat, depth = self.view_transform(input, depth, tran_feat)
-        return bev_feat, depth
+        return bev_feat, depth, tran_feat
 
 
 @NECKS.register_module()
