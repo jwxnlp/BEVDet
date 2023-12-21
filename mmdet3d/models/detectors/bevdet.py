@@ -657,16 +657,16 @@ class BEVStereo4D(BEVDepth4D):
         #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         if self.with_specific_component('backward_projection'):
             cam_params = (sensor2keyego[..., :3, :3], sensor2keyego[..., :3, 3], 
-                          intrin, post_rot,  post_tran, bda)
+                          intrin, post_rot, post_tran, bda)
             # [B, E, bev_h, bev_w]
             B, N_view = img.shape[:2]
             C, H_LX, W_LX = context.shape[-3:]
             D, H_LX, W_LX = depth.shape[-3:]
-            lss_bev = bev_feat.permute(0, 1, 3, 4, 2).contiguous()
+            # [B, C, Y, X, Z]
             bev_feat_refined = self.backward_projection(
                 [context.view(B, N_view, C, H_LX, W_LX)], # one level
                 img_metas,
-                lss_bev=lss_bev.mean(-1), # [B, con_C, Y, X], # [B, con_C, Y, X, Z]
+                lss_bev=bev_feat.mean(2), # [B, con_C, Y, X]
                 cam_params=cam_params,
                 bev_mask=None,
                 gt_bboxes_3d=None,

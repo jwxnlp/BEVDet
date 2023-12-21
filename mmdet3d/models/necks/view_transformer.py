@@ -202,10 +202,12 @@ class LSSViewTransformer(BaseModule):
         bev_feat_shape = (depth.shape[0], int(self.grid_size[2]),
                           int(self.grid_size[1]), int(self.grid_size[0]),
                           feat.shape[-1])  # (B, Z, Y, X, C)
-        # [4, 32, 16, 200, 200], torch.float32, C is changed to 1-index after bev_pool_v2
+        # # [B, C, Z, Y, X], torch.float32, C is changed to 1-index after bev_pool_v2
         bev_feat = bev_pool_v2(depth, feat, ranks_depth, ranks_feat, ranks_bev,
                                bev_feat_shape, interval_starts,
                                interval_lengths)
+        # mask = bev_feat.abs().sum(dim=1) != 0
+        
         # collapse Z
         if self.collapse_z:
             bev_feat = torch.cat(bev_feat.unbind(dim=2), 1)
