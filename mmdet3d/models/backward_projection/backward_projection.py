@@ -70,6 +70,10 @@ class BackwardProjection(BaseModule):
         self.transformer = build_transformer(transformer)
         self.embed_dims = self.transformer.embed_dims # numC_Trans
 
+        
+        self.compress_net = nn.Sequential(
+            nn.Linear(self.embed_dims*2, self.embed_dims),
+        )
 
         self._init_layers()
 
@@ -111,7 +115,9 @@ class BackwardProjection(BaseModule):
         
         if lss_bev is not None:
             lss_bev = lss_bev.flatten(2).permute(2, 0, 1) # [Y*X, B, con_C]
-            bev_queries = bev_queries + lss_bev # why not assign value
+            bev_queries = torch.cat((bev_queries, lss_bev), dim=-1)
+            bev_queries = self.compress_net(bev_queries)
+            # bev_queries = bev_queries + lss_bev # why not assign value
         
         if bev_mask is not None:
             bev_mask = bev_mask.reshape(bs, -1)
