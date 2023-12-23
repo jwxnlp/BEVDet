@@ -74,6 +74,7 @@ class BEVFormer(BaseModule):
             self,
             mlvl_feats, # [[B, N_view, con_C, H_L4, W_L4], ], one level
             bev_queries, # [bev_h * bev_w, B, E]
+            lss_bev, # [Y * X, B, E]
             bev_h,
             bev_w,
             # grid_length=[0.512, 0.512],
@@ -115,6 +116,7 @@ class BEVFormer(BaseModule):
 
         bev_embed = self.encoder(
             bev_queries, # [bev_h * bev_w, B, E]
+            lss_bev, # [Y * X, B, E]
             feat_flatten, # [N_view, N_MLVL, B, con_C]
             feat_flatten, # [N_view, N_MLVL, B, con_C]
             bev_h=bev_h,

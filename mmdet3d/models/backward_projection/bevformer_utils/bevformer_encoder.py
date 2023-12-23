@@ -157,6 +157,7 @@ class bevformer_encoder(TransformerLayerSequence):
     @auto_fp16()
     def forward(self,
                 bev_query, # [bev_h * bev_w, B, E]
+                lss_bev, # [Y * X, B, E]
                 key, # [N_view, N_MLVL, B, con_C]
                 value, # [N_view, N_MLVL, B, con_C]
                 *args,
@@ -210,11 +211,13 @@ class bevformer_encoder(TransformerLayerSequence):
         ref_3d, reference_points_cam, per_cam_mask_list, bev_query_depth = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas'], cam_params=cam_params, gt_bboxes_3d=gt_bboxes_3d)
         bev_query = bev_query.permute(1, 0, 2) # [B, bev_h * bev_w, E]
+        lss_bev = lss_bev.permute(1, 0, 2) # [B, Y * X, E]
         bev_pos = bev_pos.permute(1, 0, 2) # [B, bev_h * bev_w, 2*_pos_dim_]
         bs, len_bev, num_bev_level, _ = ref_2d.shape
         for lid, layer in enumerate(self.layers):
             output = layer(
                 bev_query, # [B, bev_h * bev_w, E]
+                lss_bev, # [B, Y * X, E]
                 key, # [N_view, N_MLVL, B, con_C]
                 value, # [N_view, N_MLVL, B, con_C]
                 *args,
@@ -290,6 +293,7 @@ class BEVFormerEncoderLayer(MyCustomBaseTransformerLayer):
     @force_fp32()
     def forward(self,
                 query, # [B, bev_h * bev_w, E]
+                lss_bev, # [B, Y * X, E]
                 key=None, # [N_view, N_MLVL, B, con_C]
                 value=None, # [N_view, N_MLVL, B, con_C]
                 bev_pos=None, # [B, bev_h * bev_w, 2*_pos_dim_]
@@ -367,8 +371,8 @@ class BEVFormerEncoderLayer(MyCustomBaseTransformerLayer):
             if layer == 'self_attn':
                 query = self.attentions[attn_index](
                     query, # [B, bev_h * bev_w, E]
-                    None,
-                    None,
+                    lss_bev, # [B, Y * X, E]
+                    lss_bev, # [B, Y * X, E]
                     identity if self.pre_norm else None,
                     query_pos=bev_pos, # [B, bev_h * bev_w, 2*_pos_dim_]
                     key_pos=bev_pos, # [B, bev_h * bev_w, 2*_pos_dim_]

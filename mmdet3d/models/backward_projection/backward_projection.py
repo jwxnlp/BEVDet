@@ -54,7 +54,6 @@ class BackwardProjection(BaseModule):
                  use_zero_embedding=False,
                  bev_h=30, # 100
                  bev_w=30, # 100
-                 
                  **kwargs):
         super().__init__()
         self.bev_h = bev_h
@@ -69,7 +68,6 @@ class BackwardProjection(BaseModule):
             positional_encoding)
         self.transformer = build_transformer(transformer)
         self.embed_dims = self.transformer.embed_dims # numC_Trans
-
 
         self._init_layers()
 
@@ -111,7 +109,7 @@ class BackwardProjection(BaseModule):
         
         if lss_bev is not None:
             lss_bev = lss_bev.flatten(2).permute(2, 0, 1) # [Y*X, B, con_C]
-            bev_queries = bev_queries + lss_bev # why not assign value
+            # bev_queries = bev_queries + lss_bev # why not assign value
         
         if bev_mask is not None:
             bev_mask = bev_mask.reshape(bs, -1)
@@ -121,6 +119,7 @@ class BackwardProjection(BaseModule):
         bev =  self.transformer(
                 mlvl_feats, # [[B, N_view, con_C, H_L4, W_L4], ], one level
                 bev_queries, # [bev_h * bev_w, B, E]
+                lss_bev, # [Y * X, B, E]
                 self.bev_h,
                 self.bev_w,
                 grid_length=(self.real_h / self.bev_h,
