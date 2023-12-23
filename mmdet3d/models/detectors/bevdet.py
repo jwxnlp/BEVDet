@@ -666,7 +666,7 @@ class BEVStereo4D(BEVDepth4D):
             bev_feat_refined = self.backward_projection(
                 [context.view(B, N_view, C, H_LX, W_LX)], # one level
                 img_metas,
-                lss_bev=bev_feat.mean(2), # [B, con_C, Y, X]
+                # lss_bev=bev_feat.mean(2), # [B, con_C, Y, X]
                 cam_params=cam_params,
                 bev_mask=None,
                 gt_bboxes_3d=None,
